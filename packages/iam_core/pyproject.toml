@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iam_core"
+version = "0.1.0"
+description = "IAM package (JWT HS256, auth middleware, require_permission) for Stag Fitness backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.111.0",
+    "pyjwt>=2.8.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "pydantic>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iam_core*"]

@@ -1,0 +1,89 @@
+"""DB operations for members. No business logic."""
+from __future__ import annotations
+
+from datetime import date, timedelta
+from uuid import UUID
+
+from sqlalchemy import Integer, and_, cast, func, or_, select
+
+from app.core.enums import PlanType
+from app.core.scope import BranchScope
+from app.models.billing import Plan, Subscription
+from app.models.member import Member
+from app.repositories.base import BaseRepository
+
+EXPIRING_WINDOW_DAYS = 7
+
+
+class MemberRepository(BaseRepository):
+
+    def _latest_membership(self):
+        """Latest MEMBERSHIP subscription per member (start_date desc, created_at desc)."""
+        rn = func.row_number().over(partition_by=Subscription.member_id,
+                                    order_by=(Subscription.start_date.desc(), Subscription.created_at.desc()))
+        inner = (select(Subscription.member_id, Subscription.plan_id, Subscription.end_date,
+                        Plan.name.label("plan_name"), rn.label("rn"))
+                 .join(Plan, Plan.id == Subscription.plan_id)
+                 .where(Subscription.is_delete.is_(False), Plan.type == PlanType.MEMBERSHIP)
+                 .subquery())
+        return select(inner).where(inner.c.rn == 1).subquery()
+
+    def _list_stmt(self, scope: BranchScope):
+        latest = self._latest_membership()
+        stmt = (select(Member, latest.c.plan_id, latest.c.plan_name, latest.c.end_date)
+                .outerjoin(latest, latest.c.member_id == Member.id))
+        return self.scoped(Member, stmt, scope), latest
+
+    async def list_members(self, scope: BranchScope, *, offset: int, limit: int, today: date,
+                           search: str | None = None, state_filter: str | None = None,
+                           plan_id: UUID | None = None) -> tuple[list, int]:
+        """Rows: (Member, plan_id, plan_name, end_date)."""
+        stmt, latest = self._list_stmt(scope)
+        if search:
+            pattern = f"%{search}%"
+            stmt = stmt.where(or_(Member.name.ilike(pattern), Member.phone.ilike(pattern),
+                                  Member.registration_id.ilike(pattern)))
+        end = latest.c.end_date
+        if state_filter == "active":
+            stmt = stmt.where(end >= today)
+        elif state_filter == "inactive":
+            stmt = stmt.where(or_(end.is_(None), end < today))
+        elif state_filter == "expiring":
+            stmt = stmt.where(and_(end >= today, end <= today + timedelta(days=EXPIRING_WINDOW_DAYS)))
+        if plan_id:
+            stmt = stmt.where(latest.c.plan_id == plan_id)
+        return await self.paginate(stmt.order_by(Member.created_at.desc()), offset=offset, limit=limit)
+
+    async def get_member_row(self, member_id: UUID, scope: BranchScope):
+        stmt, _ = self._list_stmt(scope)
+        return (await self._db.execute(stmt.where(Member.id == member_id))).first()
+
+    async def get_member(self, member_id: UUID, scope: BranchScope) -> Member | None:
+        return await self.get_scoped(Member, member_id, scope)
+
+    async def get_by_phone(self, branch_id: UUID, phone: str) -> Member | None:
+        stmt = self.alive(Member, select(Member).where(Member.branch_id == branch_id, Member.phone == phone))
+        return (await self._db.execute(stmt)).scalar_one_or_none()
+
+    async def last_registration_number(self, organization_id: UUID) -> int:
+        """Highest numeric suffix of SG-### registration ids in the organization (deleted rows included)."""
+        num = cast(func.substring(Member.registration_id, 4), Integer)
+        stmt = select(func.max(num)).where(Member.organization_id == organization_id,
+                                           Member.registration_id.op("~")(r"^SG-\d+$"))
+        return (await self._db.execute(stmt)).scalar_one() or 0
+
+    async def has_subscriptions(self, member_id: UUID) -> bool:
+        stmt = select(Subscription.id).where(Subscription.member_id == member_id,
+                                             Subscription.is_delete.is_(False)).limit(1)
+        return (await self._db.execute(stmt)).first() is not None
+
+    async def count_members(self, scope: BranchScope) -> int:
+        stmt = self.scoped(Member, select(func.count(Member.id)), scope)
+        return (await self._db.execute(stmt)).scalar_one()
+
+    async def count_with_active_membership(self, scope: BranchScope, today: date) -> int:
+        latest = self._latest_membership()
+        stmt = self.scoped(Member, select(func.count(Member.id))
+                           .join(latest, latest.c.member_id == Member.id)
+                           .where(latest.c.end_date >= today), scope)
+        return (await self._db.execute(stmt)).scalar_one()

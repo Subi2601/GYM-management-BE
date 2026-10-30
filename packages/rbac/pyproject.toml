@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rbac"
+version = "0.1.0"
+description = "RBAC models and permission engine for Stag Fitness backend"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy[asyncio]>=2.0",
+    "pydantic>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rbac*"]

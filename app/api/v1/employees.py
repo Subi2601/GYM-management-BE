@@ -1,0 +1,86 @@
+"""Employee routes — registration + permission decorators only."""
+from __future__ import annotations
+
+from typing import Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
+from iam_core import RequestContext, require_permission
+from shared.schemas.base_schema import PaginatedEnvelope, ResponseEnvelope
+from shared.utils.pagination import PaginationParams, get_pagination
+
+from app.controllers.employee_controller import EmployeeController
+from app.core.enums import EmployeeRole
+from app.core.scope import BranchScope
+from app.dependencies import get_branch_scope, get_current_user, get_pii_access
+from app.schemas.employee import (EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
+                                  FeedbackCreate, FeedbackCreated, TrainerOption)
+
+router = APIRouter(prefix="/api/v1/employees", tags=["employees"])
+
+
+@router.get("", response_model=PaginatedEnvelope[EmployeeResponse],
+            dependencies=[Depends(require_permission("employee:list"))])
+async def list_employees(
+    pagination: PaginationParams = Depends(get_pagination),
+    status: Literal["active", "archive", "all"] = Query(default="active"),
+    role: EmployeeRole | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=100),
+    scope: BranchScope = Depends(get_branch_scope),
+    show_pii: bool = Depends(get_pii_access),
+    controller: EmployeeController = Depends(),
+):
+    return await controller.list_employees(scope, pagination, status, role, search, show_pii)
+
+
+@router.get("/trainers", response_model=ResponseEnvelope[list[TrainerOption]],
+            dependencies=[Depends(require_permission("employee:list"))])
+async def list_trainers(scope: BranchScope = Depends(get_branch_scope),
+                        controller: EmployeeController = Depends()):
+    return await controller.list_trainers(scope)
+
+
+@router.get("/{employee_id}", response_model=ResponseEnvelope[EmployeeResponse],
+            dependencies=[Depends(require_permission("employee:list"))])
+async def get_employee(employee_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+                       show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
+    return await controller.get_employee(employee_id, scope, show_pii)
+
+
+@router.get("/{employee_id}/profile", response_model=ResponseEnvelope[EmployeeProfileResponse],
+            dependencies=[Depends(require_permission("employee:list"))])
+async def get_employee_profile(employee_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+                               show_pii: bool = Depends(get_pii_access),
+                               controller: EmployeeController = Depends()):
+    return await controller.get_profile(employee_id, scope, show_pii)
+
+
+@router.post("", response_model=ResponseEnvelope[EmployeeResponse], status_code=201,
+             dependencies=[Depends(require_permission("employee:create"))])
+async def create_employee(body: EmployeeCreate, scope: BranchScope = Depends(get_branch_scope),
+                          ctx: RequestContext = Depends(get_current_user),
+                          show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
+    return await controller.create_employee(body, scope, ctx, show_pii)
+
+
+@router.put("/{employee_id}", response_model=ResponseEnvelope[EmployeeResponse],
+            dependencies=[Depends(require_permission("employee:update"))])
+async def update_employee(employee_id: UUID, body: EmployeeUpdate, scope: BranchScope = Depends(get_branch_scope),
+                          ctx: RequestContext = Depends(get_current_user),
+                          show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
+    return await controller.update_employee(employee_id, body, scope, ctx, show_pii)
+
+
+@router.patch("/{employee_id}/terminate", response_model=ResponseEnvelope[EmployeeResponse],
+              dependencies=[Depends(require_permission("employee:terminate"))])
+async def terminate_employee(employee_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+                             ctx: RequestContext = Depends(get_current_user),
+                             show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
+    return await controller.terminate_employee(employee_id, scope, ctx, show_pii)
+
+
+@router.post("/{employee_id}/feedback", response_model=ResponseEnvelope[FeedbackCreated], status_code=201,
+             dependencies=[Depends(require_permission("feedback:create"))])
+async def add_feedback(employee_id: UUID, body: FeedbackCreate, scope: BranchScope = Depends(get_branch_scope),
+                       ctx: RequestContext = Depends(get_current_user), controller: EmployeeController = Depends()):
+    return await controller.add_feedback(employee_id, body, scope, ctx)
