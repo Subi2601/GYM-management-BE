@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import EmployeeRole
 from app.core.scope import BranchScope
 from app.dependencies import get_db
-from app.schemas.employee import (EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
+from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
                                   FeedbackCreate, FeedbackCreated, TrainerOption)
 from app.services.employee_service import EmployeeService
 
@@ -22,13 +22,16 @@ class EmployeeController:
         self._service = EmployeeService(db)
 
     async def list_employees(self, scope: BranchScope, pagination: PaginationParams, status_filter: str,
-                             role: EmployeeRole | None, search: str | None,
-                             show_pii: bool) -> PaginatedEnvelope[EmployeeResponse]:
+                             role: EmployeeRole | None, search: str | None, sort_by: str | None,
+                             sort_dir: str, show_pii: bool) -> PaginatedEnvelope[EmployeeResponse]:
         rows, total = await self._service.list_employees(
             scope, offset=pagination.offset, limit=pagination.limit, status_filter=status_filter,
-            role=role, search=search, show_pii=show_pii)
+            role=role, search=search, sort_by=sort_by, sort_dir=sort_dir, show_pii=show_pii)
         return PaginatedEnvelope.ok([EmployeeResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
+
+    async def counts(self, scope: BranchScope) -> ResponseEnvelope[EmployeeCounts]:
+        return ResponseEnvelope.ok(EmployeeCounts(**await self._service.status_counts(scope)))
 
     async def list_trainers(self, scope: BranchScope) -> ResponseEnvelope[list[TrainerOption]]:
         return ResponseEnvelope.ok([TrainerOption(**t) for t in await self._service.list_trainers(scope)])

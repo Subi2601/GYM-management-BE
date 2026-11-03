@@ -1,6 +1,7 @@
 """Members request/response handling — no business logic (MemberService)."""
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
 from fastapi import Depends
@@ -9,6 +10,7 @@ from shared.schemas.base_schema import PaginatedEnvelope, ResponseEnvelope
 from shared.utils.pagination import PaginationParams
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.enums import Gender
 from app.core.scope import BranchScope
 from app.dependencies import get_db
 from app.schemas.common import CodeResponse
@@ -21,11 +23,13 @@ class MemberController:
         self._service = MemberService(db)
 
     async def list_members(self, scope: BranchScope, pagination: PaginationParams, search: str | None,
-                           state_filter: str | None, plan_id: UUID | None,
-                           show_pii: bool) -> PaginatedEnvelope[MemberResponse]:
+                           state_filter: str | None, plan_id: UUID | None, gender: Gender | None,
+                           joined_from: date | None, joined_to: date | None, sort_by: str | None,
+                           sort_dir: str, show_pii: bool) -> PaginatedEnvelope[MemberResponse]:
         rows, total = await self._service.list_members(
             scope, offset=pagination.offset, limit=pagination.limit, search=search,
-            state_filter=state_filter, plan_id=plan_id, show_pii=show_pii)
+            state_filter=state_filter, plan_id=plan_id, gender=gender, joined_from=joined_from,
+            joined_to=joined_to, sort_by=sort_by, sort_dir=sort_dir, show_pii=show_pii)
         return PaginatedEnvelope.ok([MemberResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
 

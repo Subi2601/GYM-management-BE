@@ -4,15 +4,27 @@ from __future__ import annotations
 from datetime import date, timedelta
 from uuid import UUID
 
-from sqlalchemy import Integer, and_, cast, func, or_, select
+from sqlalchemy import ColumnElement, Integer, and_, cast, func, or_, select
 
-from app.core.enums import PlanType
+from app.core.enums import MEMBERSHIP_PLAN_TYPES, Gender
 from app.core.scope import BranchScope
 from app.models.billing import Plan, Subscription
 from app.models.member import Member
 from app.repositories.base import BaseRepository
 
 EXPIRING_WINDOW_DAYS = 7
+MEMBER_TABS = ("all", "active", "expiring", "inactive")
+
+
+def _state_condition(end, state_filter: str | None, today: date) -> ColumnElement[bool] | None:
+    """WHERE clause of a list tab on the latest membership end date; None = every member."""
+    if state_filter == "active":
+        return end >= today
+    if state_filter == "inactive":
+        return or_(end.is_(None), end < today)
+    if state_filter == "expiring":
+        return and_(end >= today, end <= today + timedelta(days=EXPIRING_WINDOW_DAYS))
+    return None
 
 
 class MemberRepository(BaseRepository):
@@ -24,7 +36,7 @@ class MemberRepository(BaseRepository):
         inner = (select(Subscription.member_id, Subscription.plan_id, Subscription.end_date,
                         Plan.name.label("plan_name"), rn.label("rn"))
                  .join(Plan, Plan.id == Subscription.plan_id)
-                 .where(Subscription.is_delete.is_(False), Plan.type == PlanType.MEMBERSHIP)
+                 .where(Subscription.is_delete.is_(False), Plan.type.in_(MEMBERSHIP_PLAN_TYPES))
                  .subquery())
         return select(inner).where(inner.c.rn == 1).subquery()
 
@@ -36,7 +48,9 @@ class MemberRepository(BaseRepository):
 
     async def list_members(self, scope: BranchScope, *, offset: int, limit: int, today: date,
                            search: str | None = None, state_filter: str | None = None,
-                           plan_id: UUID | None = None) -> tuple[list, int]:
+                           plan_id: UUID | None = None, gender: Gender | None = None,
+                           joined_from: date | None = None, joined_to: date | None = None,
+                           sort_by: str | None = None, sort_dir: str = "desc") -> tuple[list, int]:
         """Rows: (Member, plan_id, plan_name, end_date)."""
         stmt, latest = self._list_stmt(scope)
         if search:
@@ -44,15 +58,25 @@ class MemberRepository(BaseRepository):
             stmt = stmt.where(or_(Member.name.ilike(pattern), Member.phone.ilike(pattern),
                                   Member.registration_id.ilike(pattern)))
         end = latest.c.end_date
-        if state_filter == "active":
-            stmt = stmt.where(end >= today)
-        elif state_filter == "inactive":
-            stmt = stmt.where(or_(end.is_(None), end < today))
-        elif state_filter == "expiring":
-            stmt = stmt.where(and_(end >= today, end <= today + timedelta(days=EXPIRING_WINDOW_DAYS)))
+        state = _state_condition(end, state_filter, today)
+        if state is not None:
+            stmt = stmt.where(state)
         if plan_id:
             stmt = stmt.where(latest.c.plan_id == plan_id)
-        return await self.paginate(stmt.order_by(Member.created_at.desc()), offset=offset, limit=limit)
+        if gender:
+            stmt = stmt.where(Member.gender == gender)
+        if joined_from:
+            stmt = stmt.where(Member.joining_date >= joined_from)
+        if joined_to:
+            stmt = stmt.where(Member.joining_date <= joined_to)
+        columns = {"registration_id": Member.registration_id, "name": Member.name, "phone": Member.phone,
+                   "joining_date": Member.joining_date, "expiry_date": end, "created_at": Member.created_at}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir, (Member.created_at.desc(),), Member.id)
+        return await self.paginate(stmt, offset=offset, limit=limit)
+
+    async def tab_counts(self, scope: BranchScope, today: date) -> dict[str, int]:
+        stmt, latest = self._list_stmt(scope)
+        return await self.count_tabs(stmt, {t: _state_condition(latest.c.end_date, t, today) for t in MEMBER_TABS})
 
     async def get_member_row(self, member_id: UUID, scope: BranchScope):
         stmt, _ = self._list_stmt(scope)
@@ -76,14 +100,3 @@ class MemberRepository(BaseRepository):
         stmt = select(Subscription.id).where(Subscription.member_id == member_id,
                                              Subscription.is_delete.is_(False)).limit(1)
         return (await self._db.execute(stmt)).first() is not None
-
-    async def count_members(self, scope: BranchScope) -> int:
-        stmt = self.scoped(Member, select(func.count(Member.id)), scope)
-        return (await self._db.execute(stmt)).scalar_one()
-
-    async def count_with_active_membership(self, scope: BranchScope, today: date) -> int:
-        latest = self._latest_membership()
-        stmt = self.scoped(Member, select(func.count(Member.id))
-                           .join(latest, latest.c.member_id == Member.id)
-                           .where(latest.c.end_date >= today), scope)
-        return (await self._db.execute(stmt)).scalar_one()

@@ -4,7 +4,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from pydantic import Field
-from shared.schemas.base_schema import TimestampMixin, UUIDSchema
+from shared.schemas.base_schema import TessBaseSchema, TimestampMixin, UUIDSchema
 
 from app.core.enums import PlanServiceType, PlanType
 from app.schemas.common import FormSchema
@@ -39,3 +39,11 @@ class PlanResponse(UUIDSchema, TimestampMixin):
     price: float
     total_sessions: int
     description: str | None = None
+
+
+class PlanCounts(TessBaseSchema):
+    """Row count per list tab (GET /plans/counts): all / MEMBERSHIP / ADD_ON / CUSTOM."""
+    all: int
+    membership: int
+    addon: int
+    custom: int

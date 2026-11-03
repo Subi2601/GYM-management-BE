@@ -5,9 +5,9 @@ from datetime import date
 from uuid import UUID
 
 from pydantic import EmailStr, Field
-from shared.schemas.base_schema import TimestampMixin, UUIDSchema
+from shared.schemas.base_schema import TessBaseSchema, TimestampMixin, UUIDSchema
 
-from app.core.enums import Gender, MemberStatus, MembershipState
+from app.core.enums import FitnessGoal, Gender, MemberStatus, MembershipState
 from app.schemas.common import FormSchema, Phone
 
 
@@ -21,7 +21,7 @@ class MemberCreate(FormSchema):
     blood_group: str | None = Field(default=None, max_length=5)
     weight: float | None = Field(default=None, gt=0, le=400)
     height: float | None = Field(default=None, gt=0, le=300)
-    fitness_goal: str | None = Field(default=None, max_length=200)
+    fitness_goal: FitnessGoal | None = None
     emergency_contact_name: str | None = Field(default=None, max_length=120)
     emergency_contact_phone: Phone | None = None
     joining_date: date | None = None          # defaults to today
@@ -40,7 +40,7 @@ class MemberUpdate(FormSchema):
     blood_group: str | None = Field(default=None, max_length=5)
     weight: float | None = Field(default=None, gt=0, le=400)
     height: float | None = Field(default=None, gt=0, le=300)
-    fitness_goal: str | None = Field(default=None, max_length=200)
+    fitness_goal: FitnessGoal | None = None
     emergency_contact_name: str | None = Field(default=None, max_length=120)
     emergency_contact_phone: Phone | None = None
     joining_date: date | None = None
@@ -61,7 +61,7 @@ class MemberResponse(UUIDSchema, TimestampMixin):
     blood_group: str | None = None
     weight: float | None = None
     height: float | None = None
-    fitness_goal: str | None = None
+    fitness_goal: FitnessGoal | None = None
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
     joining_date: date
@@ -75,6 +75,9 @@ class MemberResponse(UUIDSchema, TimestampMixin):
     expiry_date: date | None = None
 
 
-class MemberCounts(FormSchema):
-    total: int
+class MemberCounts(TessBaseSchema):
+    """Row count per list tab (GET /members/counts) — same rules as `filter`."""
+    all: int
     active: int
+    expiring: int
+    inactive: int

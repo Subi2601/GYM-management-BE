@@ -1,6 +1,7 @@
 """Leads business logic — follow-up history, conversion to member."""
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
 from iam_core import RequestContext
@@ -43,10 +44,19 @@ class LeadService:
 
     # ── queries ──────────────────────────────────────────────────────────
     async def list_leads(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
-                         lead_filter: str | None) -> tuple[list[dict], int]:
+                         lead_filter: str | None, status: LeadStatus | None, follow_up_from: date | None,
+                         follow_up_to: date | None, sort_by: str | None,
+                         sort_dir: str) -> tuple[list[dict], int]:
+        if follow_up_from and follow_up_to and follow_up_from > follow_up_to:
+            raise BadRequestError("follow_up_from must be on or before follow_up_to")
         leads, total = await self._repo.list_leads(scope, offset=offset, limit=limit, search=search,
-                                                   lead_filter=lead_filter)
+                                                   lead_filter=lead_filter, status=status,
+                                                   follow_up_from=follow_up_from, follow_up_to=follow_up_to,
+                                                   sort_by=sort_by, sort_dir=sort_dir)
         return [self.lead_out(x) for x in leads], total
+
+    async def tab_counts(self, scope: BranchScope) -> dict:
+        return await self._repo.tab_counts(scope)
 
     async def get_lead(self, lead_id: UUID, scope: BranchScope) -> dict:
         return self.lead_out(await self._get(lead_id, scope))

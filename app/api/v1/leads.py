@@ -1,6 +1,7 @@
 """Lead routes — registration + permission decorators only."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -10,9 +11,11 @@ from shared.schemas.base_schema import PaginatedEnvelope, ResponseEnvelope
 from shared.utils.pagination import PaginationParams, get_pagination
 
 from app.controllers.lead_controller import LeadController
+from app.core.enums import LeadStatus
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
-from app.schemas.lead import LeadConvertResponse, LeadCreate, LeadFollowUp, LeadResponse, LeadUpdate
+from app.schemas.common import SortDir
+from app.schemas.lead import LeadConvertResponse, LeadCounts, LeadCreate, LeadFollowUp, LeadResponse, LeadUpdate
 
 router = APIRouter(prefix="/api/v1/leads", tags=["leads"])
 
@@ -23,10 +26,23 @@ async def list_leads(
     pagination: PaginationParams = Depends(get_pagination),
     search: str | None = Query(default=None, max_length=100),
     filter: Literal["all", "followup", "rejected"] = Query(default="all"),
+    status: LeadStatus | None = Query(default=None),
+    follow_up_from: date | None = Query(default=None),
+    follow_up_to: date | None = Query(default=None),
+    sort_by: Literal["name", "status", "plan_to_join_date", "next_follow_up_date",
+                     "created_at"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     controller: LeadController = Depends(),
 ):
-    return await controller.list_leads(scope, pagination, search, filter)
+    return await controller.list_leads(scope, pagination, search, filter, status, follow_up_from, follow_up_to,
+                                       sort_by, sort_dir)
+
+
+@router.get("/counts", response_model=ResponseEnvelope[LeadCounts],
+            dependencies=[Depends(require_permission("lead:list"))])
+async def lead_counts(scope: BranchScope = Depends(get_branch_scope), controller: LeadController = Depends()):
+    return await controller.counts(scope)
 
 
 @router.get("/{lead_id}", response_model=ResponseEnvelope[LeadResponse],

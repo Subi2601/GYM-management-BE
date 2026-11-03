@@ -117,3 +117,11 @@ class SubscriptionDetail(SubscriptionResponse):
     plans: list[SubscriptionPlanLine]         # every plan billed together (same payment), or just this one
     payment: SubscriptionPaymentSummary | None = None
     pt_subscription_id: UUID | None = None
+
+
+class SubscriptionCounts(TessBaseSchema):
+    """Row count per board tab (GET /subscriptions/counts); `active` = renewal_state NONE."""
+    all: int
+    expiring: int
+    expired: int
+    active: int

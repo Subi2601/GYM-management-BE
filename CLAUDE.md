@@ -28,6 +28,10 @@ PyJWT HS256 · bcrypt (cost 12) · cryptography (Fernet). No Redis / Celery / ba
   once data exists — stored PII would become unreadable.
 - **PII** (Aadhaar, PAN, ID-proof, bank account) stored Fernet-encrypted (`*_enc` columns); returned
   plain only with `pii:view`, otherwise masked `XXXX-XXXX-1234`. Never log PII or tokens.
+- **Lists**: paginated lists take `search`, `sort_by` (a `Literal` whitelist mapped through
+  `BaseRepository.ordered`) and `sort_dir`. A list with status tabs also exposes `GET /<list>/counts`
+  (declared before `/{id}`): one query via `BaseRepository.count_tabs`, reusing the same per-tab condition
+  function as the list so the numbers always match.
 - **Enums** only in `app/core/enums.py`. **Dates**: business "today" = `app.core.timeutil.today()`
   (APP_TIMEZONE, default Asia/Kolkata). **Money**: `Numeric(12,2)` / Decimal in services, `float` in schemas.
 - **Tables** are module-prefixed: `auth_`, `org_`, `member_`, `lead_`, `plan_`, `subscription_`, `payment_`,
@@ -45,6 +49,6 @@ python -m venv env; .\env\Scripts\pip install -r requirements.txt
 .\env\Scripts\python -m scripts.gen_dev_secrets          # first time: prints JWT_SECRET / PII_KEY for .env
 .\env\Scripts\alembic upgrade head
 .\env\Scripts\python -m app.utils.seed                    # RBAC catalogue, demo org/branches/logins, foods, plans
-.\env\Scripts\uvicorn app.main:app --port 8000 --reload
+.\env\Scripts\uvicorn app.main:app --port 8001 --reload   # 8001: the frontend proxy's default
 .\env\Scripts\python -m scripts.smoke_test                # + smoke_org_plans_leads / smoke_billing / smoke_staff / smoke_diet
 ```

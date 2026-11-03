@@ -21,9 +21,11 @@ class DietController:
         self._service = DietService(db)
 
     async def list_eligible(self, scope: BranchScope, pagination: PaginationParams,
-                            search: str | None) -> PaginatedEnvelope[EligibleMemberResponse]:
+                            search: str | None, has_plan: bool | None, sort_by: str | None,
+                            sort_dir: str) -> PaginatedEnvelope[EligibleMemberResponse]:
         rows, total = await self._service.list_eligible(scope, offset=pagination.offset, limit=pagination.limit,
-                                                        search=search)
+                                                        search=search, has_plan=has_plan, sort_by=sort_by,
+                                                        sort_dir=sort_dir)
         return PaginatedEnvelope.ok([EligibleMemberResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
 
@@ -43,7 +45,7 @@ class DietController:
         data = await self._service.add_item(member_id, body, scope, ctx)
         return ResponseEnvelope.ok(DietPlanResponse(**data), message="Food added to meal")
 
-    async def remove_item(self, member_id: UUID, item_id: UUID,
-                          scope: BranchScope) -> ResponseEnvelope[DietPlanResponse]:
-        data = await self._service.remove_item(member_id, item_id, scope)
+    async def remove_item(self, member_id: UUID, item_id: UUID, scope: BranchScope,
+                          ctx: RequestContext) -> ResponseEnvelope[DietPlanResponse]:
+        data = await self._service.remove_item(member_id, item_id, scope, ctx)
         return ResponseEnvelope.ok(DietPlanResponse(**data), message="Food removed from meal")

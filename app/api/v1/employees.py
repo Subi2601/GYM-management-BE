@@ -13,7 +13,8 @@ from app.controllers.employee_controller import EmployeeController
 from app.core.enums import EmployeeRole
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user, get_pii_access
-from app.schemas.employee import (EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
+from app.schemas.common import SortDir
+from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
                                   FeedbackCreate, FeedbackCreated, TrainerOption)
 
 router = APIRouter(prefix="/api/v1/employees", tags=["employees"])
@@ -26,11 +27,21 @@ async def list_employees(
     status: Literal["active", "archive", "all"] = Query(default="active"),
     role: EmployeeRole | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
+    sort_by: Literal["employee_code", "name", "role", "base_salary", "date_of_joining", "average_rating",
+                     "created_at"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     show_pii: bool = Depends(get_pii_access),
     controller: EmployeeController = Depends(),
 ):
-    return await controller.list_employees(scope, pagination, status, role, search, show_pii)
+    return await controller.list_employees(scope, pagination, status, role, search, sort_by, sort_dir, show_pii)
+
+
+@router.get("/counts", response_model=ResponseEnvelope[EmployeeCounts],
+            dependencies=[Depends(require_permission("employee:list"))])
+async def employee_counts(scope: BranchScope = Depends(get_branch_scope),
+                          controller: EmployeeController = Depends()):
+    return await controller.counts(scope)
 
 
 @router.get("/trainers", response_model=ResponseEnvelope[list[TrainerOption]],

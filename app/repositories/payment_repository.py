@@ -62,7 +62,8 @@ class PaymentRepository(BaseRepository):
 
     async def list_payments(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
                             payment_mode: PaymentMode | None, date_from: date | None,
-                            date_to: date | None) -> tuple[list, int]:
+                            date_to: date | None, has_balance: bool | None = None,
+                            sort_by: str | None = None, sort_dir: str = "desc") -> tuple[list, int]:
         stmt = self._list_stmt(scope)
         if search:
             pattern = f"%{search}%"
@@ -74,7 +75,13 @@ class PaymentRepository(BaseRepository):
             stmt = stmt.where(Payment.payment_date >= date_from)
         if date_to:
             stmt = stmt.where(Payment.payment_date <= date_to)
-        stmt = stmt.order_by(Payment.payment_date.desc(), Payment.created_at.desc())
+        if has_balance is not None:
+            stmt = stmt.where(Payment.balance_amount > 0 if has_balance else Payment.balance_amount == 0)
+        columns = {"receipt_no": Payment.receipt_no, "payment_date": Payment.payment_date,
+                   "member_name": Member.name, "paid_amount": Payment.paid_amount,
+                   "balance_amount": Payment.balance_amount, "created_at": Payment.created_at}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir,
+                            (Payment.payment_date.desc(), Payment.created_at.desc()), Payment.id)
         return await self.paginate(stmt, offset=offset, limit=limit)
 
     async def get_payment_row(self, payment_id: UUID, scope: BranchScope):

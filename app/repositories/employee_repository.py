@@ -22,7 +22,8 @@ class EmployeeRepository(BaseRepository):
     async def list_employees(self, scope: BranchScope, *, offset: int, limit: int,
                              statuses: tuple[EmployeeStatus, ...] | None = None,
                              role: EmployeeRole | None = None,
-                             search: str | None = None) -> tuple[list[Employee], int]:
+                             search: str | None = None, sort_by: str | None = None,
+                             sort_dir: str = "desc") -> tuple[list[Employee], int]:
         stmt = self.scoped(Employee, select(Employee), scope)
         if statuses:
             stmt = stmt.where(Employee.status.in_(statuses))
@@ -32,8 +33,17 @@ class EmployeeRepository(BaseRepository):
             pattern = f"%{search}%"
             stmt = stmt.where(or_(Employee.name.ilike(pattern), Employee.employee_code.ilike(pattern),
                                   Employee.phone.ilike(pattern)))
-        stmt = stmt.order_by(Employee.employee_code.asc())
+        columns = {"employee_code": Employee.employee_code, "name": Employee.name, "role": Employee.role,
+                   "base_salary": Employee.base_salary, "date_of_joining": Employee.date_of_joining,
+                   "average_rating": Employee.average_rating, "created_at": Employee.created_at}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir, (Employee.employee_code.asc(),), Employee.id)
         return await self.paginate_scalars(stmt, offset=offset, limit=limit)
+
+    async def status_counts(self, scope: BranchScope,
+                            groups: dict[str, tuple[EmployeeStatus, ...] | None]) -> dict[str, int]:
+        """One count per status group (None = every employee)."""
+        return await self.count_tabs(self.scoped(Employee, select(Employee), scope), {
+            key: None if statuses is None else Employee.status.in_(statuses) for key, statuses in groups.items()})
 
     async def get_employee(self, employee_id: UUID, scope: BranchScope) -> Employee | None:
         return await self.get_scoped(Employee, employee_id, scope)

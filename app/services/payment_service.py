@@ -160,12 +160,14 @@ class PaymentService:
     # ── queries ──────────────────────────────────────────────────────────
     async def list_payments(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
                             payment_mode: PaymentMode | None, date_from: date | None,
-                            date_to: date | None) -> tuple[list[dict], int]:
+                            date_to: date | None, has_balance: bool | None, sort_by: str | None,
+                            sort_dir: str) -> tuple[list[dict], int]:
         if date_from and date_to and date_from > date_to:
             raise BadRequestError("date_from must be on or before date_to")
         rows, total = await self._repo.list_payments(scope, offset=offset, limit=limit, search=search,
                                                      payment_mode=payment_mode, date_from=date_from,
-                                                     date_to=date_to)
+                                                     date_to=date_to, has_balance=has_balance,
+                                                     sort_by=sort_by, sort_dir=sort_dir)
         return [self.payment_out(*r) for r in rows], total
 
     async def get_payment(self, payment_id: UUID, scope: BranchScope) -> dict:

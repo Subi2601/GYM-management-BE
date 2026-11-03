@@ -1,6 +1,7 @@
 """Plan routes — registration + permission decorators only."""
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -12,7 +13,8 @@ from app.controllers.plan_controller import PlanController
 from app.core.enums import PlanServiceType, PlanType
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
-from app.schemas.plan import PlanCreate, PlanResponse, PlanUpdate
+from app.schemas.common import SortDir
+from app.schemas.plan import PlanCounts, PlanCreate, PlanResponse, PlanUpdate
 
 router = APIRouter(prefix="/api/v1/plans", tags=["plans"])
 
@@ -24,10 +26,19 @@ async def list_plans(
     search: str | None = Query(default=None, max_length=100),
     type: PlanType | None = Query(default=None),
     service_type: PlanServiceType | None = Query(default=None),
+    sort_by: Literal["name", "type", "service_type", "duration_days", "price",
+                     "created_at"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     controller: PlanController = Depends(),
 ):
-    return await controller.list_plans(scope, pagination, search, type, service_type)
+    return await controller.list_plans(scope, pagination, search, type, service_type, sort_by, sort_dir)
+
+
+@router.get("/counts", response_model=ResponseEnvelope[PlanCounts],
+            dependencies=[Depends(require_permission("plan:list"))])
+async def plan_counts(scope: BranchScope = Depends(get_branch_scope), controller: PlanController = Depends()):
+    return await controller.counts(scope)
 
 
 @router.get("/{plan_id}", response_model=ResponseEnvelope[PlanResponse],

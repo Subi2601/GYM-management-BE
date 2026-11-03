@@ -1,6 +1,7 @@
 """Member routes — registration + permission decorators only."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -10,9 +11,10 @@ from shared.schemas.base_schema import PaginatedEnvelope, ResponseEnvelope
 from shared.utils.pagination import PaginationParams, get_pagination
 
 from app.controllers.member_controller import MemberController
+from app.core.enums import Gender
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user, get_pii_access
-from app.schemas.common import CodeResponse
+from app.schemas.common import CodeResponse, SortDir
 from app.schemas.member import MemberCounts, MemberCreate, MemberResponse, MemberUpdate
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
@@ -25,11 +27,18 @@ async def list_members(
     search: str | None = Query(default=None, max_length=100),
     filter: Literal["all", "active", "inactive", "expiring"] = Query(default="all"),
     plan_id: UUID | None = Query(default=None),
+    gender: Gender | None = Query(default=None),
+    joined_from: date | None = Query(default=None),
+    joined_to: date | None = Query(default=None),
+    sort_by: Literal["registration_id", "name", "phone", "joining_date", "expiry_date",
+                     "created_at"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     show_pii: bool = Depends(get_pii_access),
     controller: MemberController = Depends(),
 ):
-    return await controller.list_members(scope, pagination, search, filter, plan_id, show_pii)
+    return await controller.list_members(scope, pagination, search, filter, plan_id, gender, joined_from,
+                                         joined_to, sort_by, sort_dir, show_pii)
 
 
 @router.get("/next-registration-id", response_model=ResponseEnvelope[CodeResponse],

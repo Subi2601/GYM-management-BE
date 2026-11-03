@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import PlanServiceType, PlanType
 from app.core.scope import BranchScope
 from app.dependencies import get_db
-from app.schemas.plan import PlanCreate, PlanResponse, PlanUpdate
+from app.schemas.plan import PlanCounts, PlanCreate, PlanResponse, PlanUpdate
 from app.services.plan_service import PlanService
 
 
@@ -22,12 +22,16 @@ class PlanController:
 
     async def list_plans(self, scope: BranchScope, pagination: PaginationParams, search: str | None,
                          plan_type: PlanType | None,
-                         service_type: PlanServiceType | None) -> PaginatedEnvelope[PlanResponse]:
+                         service_type: PlanServiceType | None, sort_by: str | None,
+                         sort_dir: str) -> PaginatedEnvelope[PlanResponse]:
         rows, total = await self._service.list_plans(scope, offset=pagination.offset, limit=pagination.limit,
                                                      search=search, plan_type=plan_type,
-                                                     service_type=service_type)
+                                                     service_type=service_type, sort_by=sort_by, sort_dir=sort_dir)
         return PaginatedEnvelope.ok([PlanResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
+
+    async def counts(self, scope: BranchScope) -> ResponseEnvelope[PlanCounts]:
+        return ResponseEnvelope.ok(PlanCounts(**await self._service.tab_counts(scope)))
 
     async def get_plan(self, plan_id: UUID, scope: BranchScope) -> ResponseEnvelope[PlanResponse]:
         return ResponseEnvelope.ok(PlanResponse(**await self._service.get_plan(plan_id, scope)))

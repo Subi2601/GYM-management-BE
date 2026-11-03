@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BeforeValidator, EmailStr, Field
 from shared.schemas.base_schema import TessBaseSchema, TimestampMixin, UUIDSchema
 
-from app.core.enums import EmployeeRole, EmployeeStatus, PTStatus
+from app.core.enums import EmployeeRole, EmployeeStatus, FitnessGoal, PTStatus
 from app.schemas.common import FormSchema, Phone
 
 
@@ -138,7 +138,7 @@ class PTClientResponse(UUIDSchema):
     member_name: str
     plan_id: UUID | None = None
     plan_name: str | None = None
-    goal: str | None = None
+    goal: FitnessGoal | None = None
     total_sessions: int
     sessions_remaining: int
     start_date: date
@@ -152,3 +152,10 @@ class EmployeeProfileResponse(TessBaseSchema):
     feedbacks: list[FeedbackResponse]
     pt_clients: list[PTClientResponse]
     average_rating: float | None = None
+
+
+class EmployeeCounts(TessBaseSchema):
+    """Row count per list tab (GET /employees/counts) — same rules as `status`."""
+    active: int
+    archive: int
+    all: int

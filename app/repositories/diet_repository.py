@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import func, or_, select
 
-from app.core.enums import PlanServiceType, PlanType
+from app.core.enums import MEMBERSHIP_PLAN_TYPES, PlanServiceType, PlanType
 from app.core.scope import BranchScope
 from app.models.billing import Plan, Subscription
 from app.models.diet import DietPlan, DietPlanItem, FoodItem
@@ -35,12 +35,13 @@ class DietRepository(BaseRepository):
         """Members holding any MEMBERSHIP subscription of ≥ 90 days."""
         return (select(Subscription.member_id)
                 .join(Plan, Plan.id == Subscription.plan_id)
-                .where(Subscription.is_delete.is_(False), Plan.type == PlanType.MEMBERSHIP,
+                .where(Subscription.is_delete.is_(False), Plan.type.in_(MEMBERSHIP_PLAN_TYPES),
                        Plan.duration_days >= LONG_MEMBERSHIP_DAYS)
                 .group_by(Subscription.member_id)
                 .subquery())
 
     def _eligibility_stmt(self, scope: BranchScope):
+        """(statement, diet-plan subquery) — the subquery is returned for has_plan / plan sort columns."""
         diet = self._latest_diet_addon()
         longm = self._long_membership()
         plan = (select(DietPlan.member_id, DietPlan.id, DietPlan.tier, DietPlan.last_modified_date)
@@ -51,17 +52,23 @@ class DietRepository(BaseRepository):
                 .outerjoin(longm, longm.c.member_id == Member.id)
                 .outerjoin(plan, plan.c.member_id == Member.id)
                 .where(or_(diet.c.plan_name.is_not(None), longm.c.member_id.is_not(None))))
-        return self.scoped(Member, stmt, scope)
+        return self.scoped(Member, stmt, scope), plan
 
-    async def list_eligible(self, scope: BranchScope, *, offset: int, limit: int,
-                            search: str | None = None) -> tuple[list, int]:
+    async def list_eligible(self, scope: BranchScope, *, offset: int, limit: int, search: str | None = None,
+                            has_plan: bool | None = None, sort_by: str | None = None,
+                            sort_dir: str = "desc") -> tuple[list, int]:
         """Rows: (Member, diet_plan_name, long_membership, plan_id, plan_tier, last_modified_date)."""
-        stmt = self._eligibility_stmt(scope)
+        stmt, plan = self._eligibility_stmt(scope)
         if search:
             pattern = f"%{search}%"
             stmt = stmt.where(or_(Member.name.ilike(pattern), Member.phone.ilike(pattern),
                                   Member.registration_id.ilike(pattern)))
-        return await self.paginate(stmt.order_by(Member.name, Member.id), offset=offset, limit=limit)
+        if has_plan is not None:
+            stmt = stmt.where(plan.c.id.is_not(None) if has_plan else plan.c.id.is_(None))
+        columns = {"name": Member.name, "registration_id": Member.registration_id, "phone": Member.phone,
+                   "plan_tier": plan.c.tier, "last_modified_date": plan.c.last_modified_date}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir, (Member.name, Member.id), Member.id)
+        return await self.paginate(stmt, offset=offset, limit=limit)
 
     async def get_eligibility(self, member_id: UUID) -> tuple[str | None, bool]:
         """(latest diet add-on plan name, has ≥90-day membership) for one member."""

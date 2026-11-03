@@ -23,10 +23,11 @@ class PaymentController:
 
     async def list_payments(self, scope: BranchScope, pagination: PaginationParams, search: str | None,
                             payment_mode: PaymentMode | None, date_from: date | None,
-                            date_to: date | None) -> PaginatedEnvelope[PaymentResponse]:
+                            date_to: date | None, has_balance: bool | None, sort_by: str | None,
+                            sort_dir: str) -> PaginatedEnvelope[PaymentResponse]:
         rows, total = await self._service.list_payments(
             scope, offset=pagination.offset, limit=pagination.limit, search=search, payment_mode=payment_mode,
-            date_from=date_from, date_to=date_to)
+            date_from=date_from, date_to=date_to, has_balance=has_balance, sort_by=sort_by, sort_dir=sort_dir)
         return PaginatedEnvelope.ok([PaymentResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
 

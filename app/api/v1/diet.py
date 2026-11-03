@@ -1,6 +1,7 @@
 """Diet plan routes — registration + permission decorators only."""
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -11,6 +12,7 @@ from shared.utils.pagination import PaginationParams, get_pagination
 from app.controllers.diet_controller import DietController
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
+from app.schemas.common import SortDir
 from app.schemas.diet import (DietPlanItemCreate, DietPlanResponse, DietPlanUpsert, EligibleMemberResponse,
                               ShareTextResponse)
 
@@ -22,10 +24,14 @@ router = APIRouter(prefix="/api/v1/diet-plans", tags=["diet-plans"])
 async def list_eligible_members(
     pagination: PaginationParams = Depends(get_pagination),
     search: str | None = Query(default=None, max_length=100),
+    has_plan: bool | None = Query(default=None),
+    sort_by: Literal["name", "registration_id", "phone", "plan_tier",
+                     "last_modified_date"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     controller: DietController = Depends(),
 ):
-    return await controller.list_eligible(scope, pagination, search)
+    return await controller.list_eligible(scope, pagination, search, has_plan, sort_by, sort_dir)
 
 
 @router.get("/member/{member_id}", response_model=ResponseEnvelope[DietPlanResponse],
@@ -59,5 +65,5 @@ async def add_diet_item(member_id: UUID, body: DietPlanItemCreate, scope: Branch
 @router.delete("/member/{member_id}/items/{item_id}", response_model=ResponseEnvelope[DietPlanResponse],
                dependencies=[Depends(require_permission("diet:manage"))])
 async def remove_diet_item(member_id: UUID, item_id: UUID, scope: BranchScope = Depends(get_branch_scope),
-                           controller: DietController = Depends()):
-    return await controller.remove_item(member_id, item_id, scope)
+                           ctx: RequestContext = Depends(get_current_user), controller: DietController = Depends()):
+    return await controller.remove_item(member_id, item_id, scope, ctx)

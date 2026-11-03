@@ -12,8 +12,9 @@ from shared.utils.pagination import PaginationParams, get_pagination
 from app.controllers.subscription_controller import SubscriptionController
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
-from app.schemas.subscription import (EnrollRequest, EnrollResponse, SubscriptionCreate, SubscriptionDetail,
-                                      SubscriptionResponse)
+from app.schemas.common import SortDir
+from app.schemas.subscription import (EnrollRequest, EnrollResponse, SubscriptionCounts, SubscriptionCreate,
+                                      SubscriptionDetail, SubscriptionResponse)
 
 router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
 
@@ -24,11 +25,22 @@ async def list_subscriptions(
     pagination: PaginationParams = Depends(get_pagination),
     search: str | None = Query(default=None, max_length=100),
     renewal_state: Literal["EXPIRED", "EXPIRING", "NONE"] | None = Query(default=None),
+    plan_id: UUID | None = Query(default=None),
+    sort_by: Literal["member_name", "plan_name", "start_date", "end_date",
+                     "created_at"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     controller: SubscriptionController = Depends(),
 ):
     """Renewal board — latest subscription per member."""
-    return await controller.list_board(scope, pagination, search, renewal_state)
+    return await controller.list_board(scope, pagination, search, renewal_state, plan_id, sort_by, sort_dir)
+
+
+@router.get("/counts", response_model=ResponseEnvelope[SubscriptionCounts],
+            dependencies=[Depends(require_permission("subscription:list"))])
+async def subscription_counts(scope: BranchScope = Depends(get_branch_scope),
+                              controller: SubscriptionController = Depends()):
+    return await controller.counts(scope)
 
 
 @router.post("/enroll", response_model=ResponseEnvelope[EnrollResponse], status_code=201,

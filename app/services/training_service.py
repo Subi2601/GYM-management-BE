@@ -50,11 +50,14 @@ class TrainingService:
     # ── queries ──────────────────────────────────────────────────────────
     async def list_pt(self, scope: BranchScope, *, offset: int, limit: int, status: PTStatus | None,
                       paid_only: bool, search: str | None, trainer_id: UUID | None,
-                      member_id: UUID | None) -> tuple[list[dict], int]:
+                      member_id: UUID | None, sort_by: str | None, sort_dir: str) -> tuple[list[dict], int]:
         rows, total = await self._repo.list_pt(scope, offset=offset, limit=limit, status=status,
                                                paid_only=paid_only, search=search, trainer_id=trainer_id,
-                                               member_id=member_id)
+                                               member_id=member_id, sort_by=sort_by, sort_dir=sort_dir)
         return [self.pt_out(*r) for r in rows], total
+
+    async def status_counts(self, scope: BranchScope, *, paid_only: bool) -> dict:
+        return await self._repo.status_counts(scope, paid_only=paid_only)
 
     async def get_pt(self, pt_id: UUID, scope: BranchScope) -> dict:
         row = await self._repo.get_pt_row(pt_id, scope)

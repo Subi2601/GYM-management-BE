@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 
 from app.core.scope import BranchScope
 from app.models.billing import Plan, Subscription
@@ -13,6 +13,18 @@ from app.models.training import PTSubscription
 from app.repositories.base import BaseRepository
 
 RENEWAL_WINDOW_DAYS = 3
+
+
+def _renewal_condition(renewal_state: str | None, today: date) -> ColumnElement[bool] | None:
+    """WHERE clause of a board tab on end_date; None = every row."""
+    window = today + timedelta(days=RENEWAL_WINDOW_DAYS)
+    if renewal_state == "EXPIRED":
+        return Subscription.end_date < today
+    if renewal_state == "EXPIRING":
+        return and_(Subscription.end_date >= today, Subscription.end_date <= window)
+    if renewal_state == "NONE":
+        return Subscription.end_date > window
+    return None
 
 
 class SubscriptionRepository(BaseRepository):
@@ -51,23 +63,34 @@ class SubscriptionRepository(BaseRepository):
         inner = self.scoped(Subscription, select(Subscription.id, rn.label("rn")), scope).subquery()
         return select(inner.c.id).where(inner.c.rn == 1)
 
-    async def list_board(self, scope: BranchScope, *, offset: int, limit: int, today: date,
-                         search: str | None, renewal_state: str | None) -> tuple[list, int]:
-        stmt = self.scoped(Subscription, self._row_select(), scope).where(
+    def _board_stmt(self, scope: BranchScope):
+        """Latest subscription per (non-deleted) member."""
+        return self.scoped(Subscription, self._row_select(), scope).where(
             Subscription.id.in_(self._latest_ids(scope)), Member.is_delete.is_(False))
+
+    async def list_board(self, scope: BranchScope, *, offset: int, limit: int, today: date,
+                         search: str | None, renewal_state: str | None, plan_id: UUID | None = None,
+                         sort_by: str | None = None, sort_dir: str = "desc") -> tuple[list, int]:
+        stmt = self._board_stmt(scope)
         if search:
             pattern = f"%{search}%"
             stmt = stmt.where(or_(Member.name.ilike(pattern), Member.phone.ilike(pattern),
                                   Member.registration_id.ilike(pattern), Plan.name.ilike(pattern)))
-        window = today + timedelta(days=RENEWAL_WINDOW_DAYS)
-        if renewal_state == "EXPIRED":
-            stmt = stmt.where(Subscription.end_date < today)
-        elif renewal_state == "EXPIRING":
-            stmt = stmt.where(and_(Subscription.end_date >= today, Subscription.end_date <= window))
-        elif renewal_state == "NONE":
-            stmt = stmt.where(Subscription.end_date > window)
-        stmt = stmt.order_by(Subscription.start_date.desc(), Subscription.created_at.desc())
+        renewal = _renewal_condition(renewal_state, today)
+        if renewal is not None:
+            stmt = stmt.where(renewal)
+        if plan_id:
+            stmt = stmt.where(Subscription.plan_id == plan_id)
+        columns = {"member_name": Member.name, "plan_name": Plan.name, "start_date": Subscription.start_date,
+                   "end_date": Subscription.end_date, "created_at": Subscription.created_at}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir,
+                            (Subscription.start_date.desc(), Subscription.created_at.desc()), Subscription.id)
         return await self.paginate(stmt, offset=offset, limit=limit)
+
+    async def board_counts(self, scope: BranchScope, today: date) -> dict[str, int]:
+        tabs = {"all": None, "expiring": "EXPIRING", "expired": "EXPIRED", "active": "NONE"}
+        return await self.count_tabs(self._board_stmt(scope),
+                                     {key: _renewal_condition(state, today) for key, state in tabs.items()})
 
     async def list_for_member(self, member_id: UUID, scope: BranchScope) -> list:
         stmt = (self.scoped(Subscription, self._row_select(), scope)

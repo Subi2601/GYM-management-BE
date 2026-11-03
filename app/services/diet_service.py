@@ -151,8 +151,10 @@ class DietService:
 
     # ── queries ──────────────────────────────────────────────────────────
     async def list_eligible(self, scope: BranchScope, *, offset: int, limit: int,
-                            search: str | None) -> tuple[list[dict], int]:
-        rows, total = await self._repo.list_eligible(scope, offset=offset, limit=limit, search=search)
+                            search: str | None, has_plan: bool | None, sort_by: str | None,
+                            sort_dir: str) -> tuple[list[dict], int]:
+        rows, total = await self._repo.list_eligible(scope, offset=offset, limit=limit, search=search,
+                                                     has_plan=has_plan, sort_by=sort_by, sort_dir=sort_dir)
         out = []
         for m, diet_name, long_membership, plan_id, plan_tier, last_modified in rows:
             out.append({
@@ -247,12 +249,12 @@ class DietService:
         await self._repo.refresh(plan)
         return await self._plan_out(plan, member)
 
-    async def remove_item(self, member_id: UUID, item_id: UUID, scope: BranchScope) -> dict:
+    async def remove_item(self, member_id: UUID, item_id: UUID, scope: BranchScope, actor: RequestContext) -> dict:
         plan, member = await self._editable_plan(member_id, scope)
         item = await self._repo.get_item(item_id, plan.id)
         if item is None:
             raise NotFoundError("Diet plan item")
-        await self._repo.delete(item)
+        item.soft_delete(actor.user_id)
         await self._repo.commit()
         await self._repo.refresh(plan)
         return await self._plan_out(plan, member)

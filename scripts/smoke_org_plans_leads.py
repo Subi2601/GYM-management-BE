@@ -233,7 +233,26 @@ def plan_checks(owner: httpx.Client, trainer: httpx.Client, me: dict) -> None:
                                                          json={"service_type": "DIET"}), 422)
     check("trainer cannot see other-branch plan", trainer.get(f"/api/v1/plans/{plan['id']}"), 404)
 
-    spare = check("create spare plan", owner.post("/api/v1/plans", json={**base, "name": f"Spare {RUN}"}),
+    # CUSTOM: a membership priced as days × per-day rate; price holds the total, so billing is unchanged.
+    custom_base = {"name": f"Smoke Custom 20d {RUN}", "type": "CUSTOM", "service_type": "GENERAL",
+                   "duration_days": 20, "price": 6000}
+    custom = check("create custom plan", owner.post("/api/v1/plans", json=custom_base), 201).get("data") or {}
+    expect("custom plan stored as total", custom.get("type") == "CUSTOM" and custom.get("price") == 6000.0, custom)
+    check("custom must be GENERAL", owner.post("/api/v1/plans", json={**custom_base, "service_type": "DIET"}), 422)
+    check("custom has no sessions", owner.post("/api/v1/plans", json={**custom_base, "total_sessions": 5}), 422)
+    counts = check("plan counts include custom", owner.get("/api/v1/plans/counts")).get("data") or {}
+    expect("custom count >= 1", counts.get("custom", 0) >= 1, counts)
+    cmember = check("create member on custom plan", owner.post("/api/v1/members", json={
+        "name": f"Custom Plan User {RUN}", "phone": phone(2)}), 201).get("data") or {}
+    check("enrol on custom plan", owner.post("/api/v1/subscriptions/enroll", json={
+        "member_id": cmember.get("id"), "plan_ids": [custom.get("id")],
+        "payment": {"paid_amount": 6000, "payment_mode": "CASH"}}), 201)
+    after = check("member after custom enrolment", owner.get(f"/api/v1/members/{cmember.get('id')}")).get("data") or {}
+    expect("custom plan counts as membership",
+           after.get("membership_state") in ("ACTIVE", "EXPIRING") and after.get("current_plan_id") == custom.get("id")
+           and after.get("expiry_date") == str(date.today() + timedelta(days=20)), after)
+
+    spare =check("create spare plan", owner.post("/api/v1/plans", json={**base, "name": f"Spare {RUN}"}),
                   201).get("data") or {}
     check("delete unused plan", owner.delete(f"/api/v1/plans/{spare['id']}"))
     check("deleted plan gone", owner.get(f"/api/v1/plans/{spare['id']}"), 404)
@@ -248,12 +267,13 @@ def plan_checks(owner: httpx.Client, trainer: httpx.Client, me: dict) -> None:
 def lead_checks(owner: httpx.Client, trainer: httpx.Client) -> None:
     print("\n── leads ──")
     today = date.today()
-    base = {"name": f"Smoke Lead {RUN}", "phone": phone(10), "location": "Anna Nagar", "goal": "Weight loss",
+    base = {"name": f"Smoke Lead {RUN}", "phone": phone(10), "location": "Anna Nagar", "goal": "WEIGHT_LOSS",
             "status": "NEW", "plan_to_join_date": str(today + timedelta(days=7)),
             "next_follow_up_date": str(today + timedelta(days=2)), "notes": "Walk-in enquiry"}
     lead = check("create lead", owner.post("/api/v1/leads", json=base), 201).get("data") or {}
     check("lead phone must be 10 digits", owner.post("/api/v1/leads", json={**base, "phone": "12345"}), 422)
     check("lead location required", owner.post("/api/v1/leads", json={**base, "location": ""}), 422)
+    check("lead goal must be a FitnessGoal code", owner.post("/api/v1/leads", json={**base, "goal": "Get fit"}), 422)
     check("lead next follow-up required", owner.post("/api/v1/leads",
                                                      json={k: v for k, v in base.items()
                                                            if k != "next_follow_up_date"}), 422)
@@ -270,8 +290,8 @@ def lead_checks(owner: httpx.Client, trainer: httpx.Client) -> None:
     expect("followup filter includes NEW lead with next date", lead.get("id") in ids(fu), fu)
     check("bad filter", owner.get("/api/v1/leads", params={"filter": "nope"}), 422)
 
-    upd = check("update lead", owner.put(f"/api/v1/leads/{lead['id']}", json={"goal": "Muscle gain"}))
-    expect("update applied", upd.get("data", {}).get("goal") == "Muscle gain", upd)
+    upd = check("update lead", owner.put(f"/api/v1/leads/{lead['id']}", json={"goal": "MUSCLE_GAIN"}))
+    expect("update applied", upd.get("data", {}).get("goal") == "MUSCLE_GAIN", upd)
     check("follow-up needs notes", owner.post(f"/api/v1/leads/{lead['id']}/follow-up", json={}), 422)
     f1 = check("follow-up 1", owner.post(f"/api/v1/leads/{lead['id']}/follow-up", json={
         "notes": "Called, interested", "next_follow_up_date": str(today + timedelta(days=3))})).get("data") or {}

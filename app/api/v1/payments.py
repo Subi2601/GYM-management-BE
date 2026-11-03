@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -13,6 +14,7 @@ from app.controllers.payment_controller import PaymentController
 from app.core.enums import PaymentMode
 from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
+from app.schemas.common import SortDir
 from app.schemas.payment import InvoiceResponse, PaymentCreate, PaymentResponse, PaymentStats
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
@@ -26,10 +28,15 @@ async def list_payments(
     payment_mode: PaymentMode | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    has_balance: bool | None = Query(default=None),
+    sort_by: Literal["receipt_no", "payment_date", "member_name", "paid_amount", "balance_amount",
+                     "created_at"] | None = Query(default=None),
+    sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     controller: PaymentController = Depends(),
 ):
-    return await controller.list_payments(scope, pagination, search, payment_mode, date_from, date_to)
+    return await controller.list_payments(scope, pagination, search, payment_mode, date_from, date_to,
+                                          has_balance, sort_by, sort_dir)
 
 
 @router.get("/stats", response_model=ResponseEnvelope[PaymentStats],

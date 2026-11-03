@@ -1,13 +1,16 @@
 """Shared schema building blocks."""
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, model_validator
 from shared.schemas.base_schema import TessBaseSchema
 
 # 10-digit Indian mobile number, as validated by the original UI.
 Phone = Annotated[str, Field(pattern=r"^\d{10}$", description="10-digit mobile number")]
+
+# Direction for list endpoints' `sort_dir` (paired with a per-endpoint `sort_by` whitelist).
+SortDir = Literal["asc", "desc"]
 
 
 class FormSchema(TessBaseSchema):

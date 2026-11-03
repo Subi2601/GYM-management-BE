@@ -5,7 +5,7 @@ from datetime import date
 
 from sqlalchemy import Date, cast, func, literal_column, select
 
-from app.core.enums import LeadStatus, PlanType
+from app.core.enums import MEMBERSHIP_PLAN_TYPES, LeadStatus
 from app.core.scope import BranchScope
 from app.models.billing import Payment, Plan, Subscription
 from app.models.member import Lead, Member
@@ -24,7 +24,7 @@ class DashboardRepository(BaseRepository):
                                     order_by=(Subscription.start_date.desc(), Subscription.created_at.desc()))
         inner = self.scoped(Subscription, select(Subscription.member_id, Subscription.end_date, rn.label("rn"))
                             .join(Plan, Plan.id == Subscription.plan_id)
-                            .where(Plan.type == PlanType.MEMBERSHIP), scope).subquery()
+                            .where(Plan.type.in_(MEMBERSHIP_PLAN_TYPES)), scope).subquery()
         return select(inner.c.member_id, inner.c.end_date).where(inner.c.rn == 1).subquery()
 
     async def count_members(self, scope: BranchScope) -> int:

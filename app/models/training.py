@@ -4,11 +4,11 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import Boolean, Date, Enum, ForeignKey, Integer, String, Text, text
+from sqlalchemy import Boolean, Date, Enum, ForeignKey, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.enums import PTStatus
+from app.core.enums import FitnessGoal, PTStatus
 from app.models.base import BaseModel, BranchScopedMixin
 
 
@@ -29,7 +29,9 @@ class PTSubscription(BranchScopedMixin, BaseModel):
         UUID(as_uuid=True), ForeignKey("subscription_subscriptions.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
-    goal: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    goal: Mapped[FitnessGoal | None] = mapped_column(
+        Enum(FitnessGoal, native_enum=False, create_constraint=False, length=200), nullable=True,
+    )
     total_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     sessions_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     start_date: Mapped[date] = mapped_column(Date, nullable=False)

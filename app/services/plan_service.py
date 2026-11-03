@@ -8,7 +8,7 @@ from iam_core import RequestContext
 from shared.exceptions.http_exceptions import BadRequestError, NotFoundError, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import PlanServiceType, PlanType
+from app.core.enums import MEMBERSHIP_PLAN_TYPES, PlanServiceType, PlanType
 from app.core.scope import BranchScope
 from app.models.billing import Plan
 from app.repositories.plan_repository import PlanRepository
@@ -18,8 +18,10 @@ _REQUIRED = ("name", "type", "service_type", "duration_days", "price", "total_se
 
 
 def _check_rules(plan_type: PlanType, service_type: PlanServiceType, total_sessions: int) -> None:
-    if plan_type == PlanType.MEMBERSHIP and service_type != PlanServiceType.GENERAL:
-        raise ValidationError("A MEMBERSHIP plan must have service type GENERAL")
+    if plan_type in MEMBERSHIP_PLAN_TYPES and service_type != PlanServiceType.GENERAL:
+        raise ValidationError(f"A {plan_type.value} plan must have service type GENERAL")
+    if plan_type == PlanType.CUSTOM and total_sessions:
+        raise ValidationError("A CUSTOM plan has no sessions")
     if service_type == PlanServiceType.PERSONAL_TRAINING and total_sessions < 1:
         raise ValidationError("A PERSONAL_TRAINING plan needs at least 1 session")
 
@@ -42,10 +44,15 @@ class PlanService:
     # ── queries ──────────────────────────────────────────────────────────
     async def list_plans(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
                          plan_type: PlanType | None,
-                         service_type: PlanServiceType | None) -> tuple[list[dict], int]:
+                         service_type: PlanServiceType | None, sort_by: str | None,
+                         sort_dir: str) -> tuple[list[dict], int]:
         plans, total = await self._repo.list_plans(scope, offset=offset, limit=limit, search=search,
-                                                   plan_type=plan_type, service_type=service_type)
+                                                   plan_type=plan_type, service_type=service_type,
+                                                   sort_by=sort_by, sort_dir=sort_dir)
         return [self.plan_out(p) for p in plans], total
+
+    async def tab_counts(self, scope: BranchScope) -> dict:
+        return await self._repo.tab_counts(scope)
 
     async def get_plan(self, plan_id: UUID, scope: BranchScope) -> dict:
         return self.plan_out(await self._get(plan_id, scope))

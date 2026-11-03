@@ -5,9 +5,9 @@ from datetime import date
 from uuid import UUID
 
 from pydantic import Field
-from shared.schemas.base_schema import TimestampMixin, UUIDSchema
+from shared.schemas.base_schema import TessBaseSchema, TimestampMixin, UUIDSchema
 
-from app.core.enums import PTStatus
+from app.core.enums import FitnessGoal, PTStatus
 from app.schemas.common import FormSchema
 
 
@@ -16,7 +16,7 @@ class PTSubscribeRequest(FormSchema):
     trainer_id: UUID
     plan_id: UUID                             # must be a PERSONAL_TRAINING plan
     start_date: date | None = None            # defaults to today
-    goal: str | None = Field(default=None, max_length=200)
+    goal: FitnessGoal | None = None
 
 
 class PTTrainerUpdate(FormSchema):
@@ -42,7 +42,7 @@ class PTSubscriptionResponse(UUIDSchema, TimestampMixin):
     plan_id: UUID | None = None
     plan_name: str
     subscription_id: UUID | None = None
-    goal: str | None = None
+    goal: FitnessGoal | None = None
     total_sessions: int
     sessions_remaining: int
     sessions_used: int
@@ -61,3 +61,11 @@ class PTSessionLogResponse(UUIDSchema, TimestampMixin):
     client_verified: bool
     notes: str | None = None
     sessions_remaining_after: int
+
+
+class PTCounts(TessBaseSchema):
+    """Row count per list tab (GET /personal-training/counts) — same rules as `status` / `paid_only`."""
+    active: int
+    completed: int
+    expired: int
+    all: int

@@ -258,7 +258,7 @@ def main() -> None:
     check("PT subscribe with cleaner → 404", owner.post("/api/v1/personal-training/subscribe", json={
         "member_id": m3, "trainer_id": cleaner, "plan_id": pt_plan}), 404)
     direct = check("PT subscribe", owner.post("/api/v1/personal-training/subscribe", json={
-        "member_id": m3, "trainer_id": trainer2, "plan_id": pt_plan, "goal": "Fat loss"}), 201)["data"]
+        "member_id": m3, "trainer_id": trainer2, "plan_id": pt_plan, "goal": "WEIGHT_LOSS"}), 201)["data"]
     expect("direct PT unpaid, 12 sessions, 30-day expiry", not direct["is_paid"] and direct["total_sessions"] == 12
            and date.fromisoformat(direct["expiry_date"]) - date.fromisoformat(direct["start_date"])
            == timedelta(days=30), direct)

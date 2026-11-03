@@ -38,9 +38,38 @@ class LeadStatus(str, enum.Enum):
     JOINED_ELSEWHERE = "JOINED_ELSEWHERE"
 
 
+class FitnessGoal(str, enum.Enum):
+    """Primary goal of a lead / member, as a coach groups clients for programming and follow-ups.
+    Stored as VARCHAR (non-native enum), so options can be added without a DB type change."""
+    # Body composition
+    WEIGHT_LOSS = "WEIGHT_LOSS"              # fat loss / slimming
+    MUSCLE_GAIN = "MUSCLE_GAIN"              # hypertrophy, bulking
+    BODY_TONING = "BODY_TONING"              # recomposition: lose fat, firm up
+    WEIGHT_GAIN = "WEIGHT_GAIN"              # underweight clients gaining healthy mass
+    # Performance
+    STRENGTH = "STRENGTH"                    # strength / powerlifting
+    ENDURANCE = "ENDURANCE"                  # stamina, cardio, running
+    SPORTS_PERFORMANCE = "SPORTS_PERFORMANCE"
+    COMPETITION_PREP = "COMPETITION_PREP"    # bodybuilding / physique shows
+    # Health & lifestyle
+    GENERAL_FITNESS = "GENERAL_FITNESS"
+    FLEXIBILITY = "FLEXIBILITY"              # mobility, posture
+    REHAB = "REHAB"                          # injury recovery, back / knee pain
+    MEDICAL_CONDITION = "MEDICAL_CONDITION"  # diabetes, BP, thyroid, PCOS
+    PRE_POST_NATAL = "PRE_POST_NATAL"
+    SENIOR_FITNESS = "SENIOR_FITNESS"
+    STRESS_RELIEF = "STRESS_RELIEF"
+    OTHER = "OTHER"
+
+
 class PlanType(str, enum.Enum):
     MEMBERSHIP = "MEMBERSHIP"
     ADD_ON = "ADD_ON"
+    CUSTOM = "CUSTOM"         # membership with a day count + per-day rate set per plan (price = days × rate)
+
+
+# Plan types that give gym access — membership expiry, renewals, dashboard and diet eligibility read these.
+MEMBERSHIP_PLAN_TYPES = (PlanType.MEMBERSHIP, PlanType.CUSTOM)
 
 
 class PlanServiceType(str, enum.Enum):

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import PTStatus
 from app.core.scope import BranchScope
 from app.dependencies import get_db
-from app.schemas.training import (PTSessionLogCreate, PTSessionLogResponse, PTSubscribeRequest,
+from app.schemas.training import (PTCounts, PTSessionLogCreate, PTSessionLogResponse, PTSubscribeRequest,
                                   PTSubscriptionResponse, PTTrainerUpdate)
 from app.services.training_service import TrainingService
 
@@ -23,13 +23,17 @@ class TrainingController:
 
     async def list_pt(self, scope: BranchScope, pagination: PaginationParams, status: str,
                       paid_only: bool, search: str | None, trainer_id: UUID | None,
-                      member_id: UUID | None) -> PaginatedEnvelope[PTSubscriptionResponse]:
+                      member_id: UUID | None, sort_by: str | None,
+                      sort_dir: str) -> PaginatedEnvelope[PTSubscriptionResponse]:
         rows, total = await self._service.list_pt(
             scope, offset=pagination.offset, limit=pagination.limit,
             status=None if status == "ALL" else PTStatus(status), paid_only=paid_only,
-            search=search, trainer_id=trainer_id, member_id=member_id)
+            search=search, trainer_id=trainer_id, member_id=member_id, sort_by=sort_by, sort_dir=sort_dir)
         return PaginatedEnvelope.ok([PTSubscriptionResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
+
+    async def counts(self, scope: BranchScope, paid_only: bool) -> ResponseEnvelope[PTCounts]:
+        return ResponseEnvelope.ok(PTCounts(**await self._service.status_counts(scope, paid_only=paid_only)))
 
     async def get_pt(self, pt_id: UUID, scope: BranchScope) -> ResponseEnvelope[PTSubscriptionResponse]:
         return ResponseEnvelope.ok(PTSubscriptionResponse(**await self._service.get_pt(pt_id, scope)))

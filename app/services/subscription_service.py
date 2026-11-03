@@ -60,11 +60,16 @@ class SubscriptionService:
 
     # ── queries ──────────────────────────────────────────────────────────
     async def list_board(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
-                         renewal_state_filter: str | None) -> tuple[list[dict], int]:
+                         renewal_state_filter: str | None, plan_id: UUID | None, sort_by: str | None,
+                         sort_dir: str) -> tuple[list[dict], int]:
         today = timeutil.today()
         rows, total = await self._repo.list_board(scope, offset=offset, limit=limit, today=today,
-                                                  search=search, renewal_state=renewal_state_filter)
+                                                  search=search, renewal_state=renewal_state_filter,
+                                                  plan_id=plan_id, sort_by=sort_by, sort_dir=sort_dir)
         return [self.subscription_out(*r, today=today) for r in rows], total
+
+    async def board_counts(self, scope: BranchScope) -> dict:
+        return await self._repo.board_counts(scope, timeutil.today())
 
     async def list_for_member(self, member_id: UUID, scope: BranchScope) -> list[dict]:
         if await self._repo.get_member(member_id, scope) is None:

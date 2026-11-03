@@ -45,7 +45,8 @@ class TrainingRepository(BaseRepository):
 
     async def list_pt(self, scope: BranchScope, *, offset: int, limit: int, status: PTStatus | None,
                       paid_only: bool, search: str | None, trainer_id: UUID | None,
-                      member_id: UUID | None) -> tuple[list, int]:
+                      member_id: UUID | None, sort_by: str | None = None,
+                      sort_dir: str = "desc") -> tuple[list, int]:
         stmt = self._row_stmt(scope).where(Member.is_delete.is_(False))
         if status is not None:
             stmt = stmt.where(PTSubscription.status == status)
@@ -60,8 +61,25 @@ class TrainingRepository(BaseRepository):
             stmt = stmt.where(or_(Member.name.ilike(pattern), Member.phone.ilike(pattern),
                                   Member.registration_id.ilike(pattern), Employee.name.ilike(pattern),
                                   Plan.name.ilike(pattern)))
-        stmt = stmt.order_by(PTSubscription.start_date.desc(), PTSubscription.created_at.desc())
+        columns = {"member_name": Member.name, "trainer_name": Employee.name,
+                   "start_date": PTSubscription.start_date, "expiry_date": PTSubscription.expiry_date,
+                   "sessions_remaining": PTSubscription.sessions_remaining,
+                   "created_at": PTSubscription.created_at}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir,
+                            (PTSubscription.start_date.desc(), PTSubscription.created_at.desc()), PTSubscription.id)
         return await self.paginate(stmt, offset=offset, limit=limit)
+
+    async def status_counts(self, scope: BranchScope, *, paid_only: bool) -> dict[str, int]:
+        """active / completed / expired / all, honouring the list's paid-only switch."""
+        stmt = self._row_stmt(scope).where(Member.is_delete.is_(False))
+        if paid_only:
+            stmt = stmt.where(PTSubscription.is_paid.is_(True))
+        return await self.count_tabs(stmt, {
+            "active": PTSubscription.status == PTStatus.ACTIVE,
+            "completed": PTSubscription.status == PTStatus.COMPLETED,
+            "expired": PTSubscription.status == PTStatus.EXPIRED,
+            "all": None,
+        })
 
     async def get_pt_row(self, pt_id: UUID, scope: BranchScope):
         return (await self._db.execute(self._row_stmt(scope).where(PTSubscription.id == pt_id))).first()

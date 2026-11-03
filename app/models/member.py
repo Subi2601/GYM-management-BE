@@ -8,7 +8,7 @@ from sqlalchemy import Date, Enum, Float, ForeignKey, String, Text, UniqueConstr
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.enums import Gender, LeadStatus, MemberStatus
+from app.core.enums import FitnessGoal, Gender, LeadStatus, MemberStatus
 from app.models.base import BaseModel, BranchScopedMixin
 
 
@@ -31,7 +31,9 @@ class Member(BranchScopedMixin, BaseModel):
     blood_group: Mapped[str | None] = mapped_column(String(5), nullable=True)
     weight: Mapped[float | None] = mapped_column(Float, nullable=True)      # kg
     height: Mapped[float | None] = mapped_column(Float, nullable=True)      # cm
-    fitness_goal: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    fitness_goal: Mapped[FitnessGoal | None] = mapped_column(
+        Enum(FitnessGoal, native_enum=False, create_constraint=False, length=200), nullable=True,
+    )
     emergency_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     emergency_contact_phone: Mapped[str | None] = mapped_column(String(15), nullable=True)
     joining_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -49,7 +51,9 @@ class Lead(BranchScopedMixin, BaseModel):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     phone: Mapped[str] = mapped_column(String(15), nullable=False, index=True)
     location: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    goal: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    goal: Mapped[FitnessGoal | None] = mapped_column(
+        Enum(FitnessGoal, native_enum=False, create_constraint=False, length=150), nullable=True,
+    )
     plan_to_join_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[LeadStatus] = mapped_column(
         Enum(LeadStatus, name="lead_status"), nullable=False,

@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.scope import BranchScope
 from app.dependencies import get_db
-from app.schemas.subscription import (EnrollRequest, EnrollResponse, SubscriptionCreate, SubscriptionDetail,
-                                      SubscriptionResponse)
+from app.schemas.subscription import (EnrollRequest, EnrollResponse, SubscriptionCounts, SubscriptionCreate,
+                                      SubscriptionDetail, SubscriptionResponse)
 from app.services.subscription_service import SubscriptionService
 
 
@@ -21,11 +21,16 @@ class SubscriptionController:
         self._service = SubscriptionService(db)
 
     async def list_board(self, scope: BranchScope, pagination: PaginationParams, search: str | None,
-                         renewal_state: str | None) -> PaginatedEnvelope[SubscriptionResponse]:
+                         renewal_state: str | None, plan_id: UUID | None, sort_by: str | None,
+                         sort_dir: str) -> PaginatedEnvelope[SubscriptionResponse]:
         rows, total = await self._service.list_board(scope, offset=pagination.offset, limit=pagination.limit,
-                                                     search=search, renewal_state_filter=renewal_state)
+                                                     search=search, renewal_state_filter=renewal_state,
+                                                     plan_id=plan_id, sort_by=sort_by, sort_dir=sort_dir)
         return PaginatedEnvelope.ok([SubscriptionResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
+
+    async def counts(self, scope: BranchScope) -> ResponseEnvelope[SubscriptionCounts]:
+        return ResponseEnvelope.ok(SubscriptionCounts(**await self._service.board_counts(scope)))
 
     async def list_for_member(self, member_id: UUID,
                               scope: BranchScope) -> ResponseEnvelope[list[SubscriptionResponse]]:

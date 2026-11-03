@@ -88,12 +88,15 @@ class EmployeeService:
 
     # ── queries ──────────────────────────────────────────────────────────
     async def list_employees(self, scope: BranchScope, *, offset: int, limit: int, status_filter: str,
-                             role: EmployeeRole | None, search: str | None,
-                             show_pii: bool) -> tuple[list[dict], int]:
+                             role: EmployeeRole | None, search: str | None, sort_by: str | None,
+                             sort_dir: str, show_pii: bool) -> tuple[list[dict], int]:
         rows, total = await self._repo.list_employees(scope, offset=offset, limit=limit,
                                                       statuses=STATUS_FILTERS.get(status_filter),
-                                                      role=role, search=search)
+                                                      role=role, search=search, sort_by=sort_by, sort_dir=sort_dir)
         return [self.employee_out(e, show_pii=show_pii) for e in rows], total
+
+    async def status_counts(self, scope: BranchScope) -> dict:
+        return await self._repo.status_counts(scope, STATUS_FILTERS)
 
     async def get_employee(self, employee_id: UUID, scope: BranchScope, show_pii: bool) -> dict:
         return self.employee_out(await self._require(employee_id, scope), show_pii=show_pii)

@@ -16,7 +16,8 @@ class PlanRepository(BaseRepository):
 
     async def list_plans(self, scope: BranchScope, *, offset: int, limit: int, search: str | None = None,
                          plan_type: PlanType | None = None,
-                         service_type: PlanServiceType | None = None) -> tuple[list[Plan], int]:
+                         service_type: PlanServiceType | None = None, sort_by: str | None = None,
+                         sort_dir: str = "desc") -> tuple[list[Plan], int]:
         stmt = self.scoped(Plan, select(Plan), scope)
         if search:
             stmt = stmt.where(Plan.name.ilike(f"%{search}%"))
@@ -24,8 +25,16 @@ class PlanRepository(BaseRepository):
             stmt = stmt.where(Plan.type == plan_type)
         if service_type:
             stmt = stmt.where(Plan.service_type == service_type)
-        return await self.paginate_scalars(stmt.order_by(Plan.type, Plan.duration_days, Plan.name),
-                                           offset=offset, limit=limit)
+        columns = {"name": Plan.name, "type": Plan.type, "service_type": Plan.service_type,
+                   "duration_days": Plan.duration_days, "price": Plan.price, "created_at": Plan.created_at}
+        stmt = self.ordered(stmt, columns, sort_by, sort_dir, (Plan.type, Plan.duration_days, Plan.name), Plan.id)
+        return await self.paginate_scalars(stmt, offset=offset, limit=limit)
+
+    async def tab_counts(self, scope: BranchScope) -> dict[str, int]:
+        """all / membership / addon / custom — the list's `type` filter."""
+        return await self.count_tabs(self.scoped(Plan, select(Plan), scope), {
+            "all": None, "membership": Plan.type == PlanType.MEMBERSHIP, "addon": Plan.type == PlanType.ADD_ON,
+            "custom": Plan.type == PlanType.CUSTOM})
 
     async def get_plan(self, plan_id: UUID, scope: BranchScope) -> Plan | None:
         return await self.get_scoped(Plan, plan_id, scope)

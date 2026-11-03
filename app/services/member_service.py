@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import timeutil
 from app.core.encryption import decrypt_pii, encrypt_pii, mask_pii
-from app.core.enums import MembershipState
+from app.core.enums import Gender, MembershipState
 from app.core.scope import BranchScope
 from app.models.member import Member
 from app.repositories.member_repository import EXPIRING_WINDOW_DAYS, MemberRepository
@@ -55,11 +55,16 @@ class MemberService:
 
     # ── queries ──────────────────────────────────────────────────────────
     async def list_members(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
-                           state_filter: str | None, plan_id: UUID | None,
-                           show_pii: bool) -> tuple[list[dict], int]:
+                           state_filter: str | None, plan_id: UUID | None, gender: Gender | None,
+                           joined_from: date | None, joined_to: date | None, sort_by: str | None,
+                           sort_dir: str, show_pii: bool) -> tuple[list[dict], int]:
+        if joined_from and joined_to and joined_from > joined_to:
+            raise BadRequestError("joined_from must be on or before joined_to")
         today = timeutil.today()
         rows, total = await self._repo.list_members(scope, offset=offset, limit=limit, today=today,
-                                                    search=search, state_filter=state_filter, plan_id=plan_id)
+                                                    search=search, state_filter=state_filter, plan_id=plan_id,
+                                                    gender=gender, joined_from=joined_from, joined_to=joined_to,
+                                                    sort_by=sort_by, sort_dir=sort_dir)
         return [self.member_out(*r, show_pii=show_pii, today=today) for r in rows], total
 
     async def get_member(self, member_id: UUID, scope: BranchScope, show_pii: bool) -> dict:
@@ -72,8 +77,7 @@ class MemberService:
         return f"SG-{await self._repo.last_registration_number(scope.organization_id) + 1:03d}"
 
     async def counts(self, scope: BranchScope) -> dict:
-        return {"total": await self._repo.count_members(scope),
-                "active": await self._repo.count_with_active_membership(scope, timeutil.today())}
+        return await self._repo.tab_counts(scope, timeutil.today())
 
     # ── commands ─────────────────────────────────────────────────────────
     async def create_member(self, data, scope: BranchScope, actor: RequestContext, show_pii: bool) -> dict:
