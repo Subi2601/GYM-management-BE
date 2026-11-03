@@ -12,10 +12,10 @@ from shared.utils.pagination import PaginationParams, get_pagination
 from app.controllers.employee_controller import EmployeeController
 from app.core.enums import EmployeeRole
 from app.core.scope import BranchScope
-from app.dependencies import get_branch_scope, get_current_user, get_pii_access
+from app.dependencies import get_branch_scope, get_current_user, get_payroll_access, get_pii_access
 from app.schemas.common import SortDir
-from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
-                                  FeedbackCreate, FeedbackCreated, TrainerOption)
+from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeePayrollUpdate, EmployeeProfileResponse,
+                                  EmployeeResponse, EmployeeUpdate, FeedbackCreate, FeedbackCreated, TrainerOption)
 
 router = APIRouter(prefix="/api/v1/employees", tags=["employees"])
 
@@ -60,10 +60,15 @@ async def get_employee(employee_id: UUID, scope: BranchScope = Depends(get_branc
 
 @router.get("/{employee_id}/profile", response_model=ResponseEnvelope[EmployeeProfileResponse],
             dependencies=[Depends(require_permission("employee:list"))])
-async def get_employee_profile(employee_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+async def get_employee_profile(employee_id: UUID,
+                               month: int | None = Query(default=None, ge=1, le=12),
+                               year: int | None = Query(default=None, ge=2000, le=2100),
+                               scope: BranchScope = Depends(get_branch_scope),
                                show_pii: bool = Depends(get_pii_access),
+                               show_payroll: bool = Depends(get_payroll_access),
                                controller: EmployeeController = Depends()):
-    return await controller.get_profile(employee_id, scope, show_pii)
+    """Staff details page; `month` / `year` pick the attendance month (default: current)."""
+    return await controller.get_profile(employee_id, scope, show_pii, show_payroll, month, year)
 
 
 @router.post("", response_model=ResponseEnvelope[EmployeeResponse], status_code=201,
@@ -80,6 +85,15 @@ async def update_employee(employee_id: UUID, body: EmployeeUpdate, scope: Branch
                           ctx: RequestContext = Depends(get_current_user),
                           show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
     return await controller.update_employee(employee_id, body, scope, ctx, show_pii)
+
+
+@router.put("/{employee_id}/payroll", response_model=ResponseEnvelope[EmployeeResponse],
+            dependencies=[Depends(require_permission("employee:update"))])
+async def update_payroll(employee_id: UUID, body: EmployeePayrollUpdate,
+                         scope: BranchScope = Depends(get_branch_scope),
+                         ctx: RequestContext = Depends(get_current_user),
+                         show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
+    return await controller.update_payroll(employee_id, body, scope, ctx, show_pii)
 
 
 @router.patch("/{employee_id}/terminate", response_model=ResponseEnvelope[EmployeeResponse],

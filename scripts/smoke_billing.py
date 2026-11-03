@@ -84,10 +84,10 @@ def make_employee(client: httpx.Client, branch_id: str, role: str, name: str) ->
     resp = client.post("/api/v1/employees", json={
         "name": name, "phone": phone(), "email": f"smk{random.randint(0, 10**8)}@example.com",
         "address": "Smoke street", "role": role, "aadhar_number": "".join(random.choices("0123456789", k=12)),
-        "pan_number": "ABCDE1234F", "id_proof_type": "Aadhar", "id_proof_number": "SMK123",
+        "pan_number": "ABCDE1234F",
         "emergency_contact_name": "Kin", "emergency_contact_phone": phone(), "emergency_contact_relation": "Brother",
-        "base_salary": 20000, "bank_name": "SBI", "bank_account_number": "12345678901",
-        "ifsc_code": "SBIN0001234", "date_of_joining": str(date.today())})
+        "date_of_joining": str(date.today()), "morning_start": "06:00", "morning_end": "10:00",
+        "evening_start": "17:00", "evening_end": "21:00"})
     if resp.status_code == 201:
         print(f"     {role} {name} created via API")
         return resp.json()["data"]["id"]

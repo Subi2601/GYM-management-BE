@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import EmployeeRole
 from app.core.scope import BranchScope
 from app.dependencies import get_db
-from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeeProfileResponse, EmployeeResponse, EmployeeUpdate,
-                                  FeedbackCreate, FeedbackCreated, TrainerOption)
+from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeePayrollUpdate, EmployeeProfileResponse,
+                                  EmployeeResponse, EmployeeUpdate, FeedbackCreate, FeedbackCreated, TrainerOption)
 from app.services.employee_service import EmployeeService
 
 
@@ -41,10 +41,11 @@ class EmployeeController:
         return ResponseEnvelope.ok(EmployeeResponse(**await self._service.get_employee(employee_id, scope,
                                                                                       show_pii)))
 
-    async def get_profile(self, employee_id: UUID, scope: BranchScope,
-                          show_pii: bool) -> ResponseEnvelope[EmployeeProfileResponse]:
-        return ResponseEnvelope.ok(EmployeeProfileResponse(**await self._service.get_profile(employee_id, scope,
-                                                                                            show_pii)))
+    async def get_profile(self, employee_id: UUID, scope: BranchScope, show_pii: bool, show_payroll: bool,
+                          month: int | None, year: int | None) -> ResponseEnvelope[EmployeeProfileResponse]:
+        data = await self._service.get_profile(employee_id, scope, show_pii=show_pii, show_payroll=show_payroll,
+                                               month=month, year=year)
+        return ResponseEnvelope.ok(EmployeeProfileResponse(**data))
 
     async def create_employee(self, body: EmployeeCreate, scope: BranchScope, ctx: RequestContext,
                               show_pii: bool) -> ResponseEnvelope[EmployeeResponse]:
@@ -55,6 +56,11 @@ class EmployeeController:
                               ctx: RequestContext, show_pii: bool) -> ResponseEnvelope[EmployeeResponse]:
         data = await self._service.update_employee(employee_id, body, scope, ctx, show_pii)
         return ResponseEnvelope.ok(EmployeeResponse(**data), message="Employee updated")
+
+    async def update_payroll(self, employee_id: UUID, body: EmployeePayrollUpdate, scope: BranchScope,
+                             ctx: RequestContext, show_pii: bool) -> ResponseEnvelope[EmployeeResponse]:
+        data = await self._service.update_payroll(employee_id, body, scope, ctx, show_pii)
+        return ResponseEnvelope.ok(EmployeeResponse(**data), message="Payroll details updated")
 
     async def terminate_employee(self, employee_id: UUID, scope: BranchScope, ctx: RequestContext,
                                  show_pii: bool) -> ResponseEnvelope[EmployeeResponse]:

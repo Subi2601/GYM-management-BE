@@ -49,6 +49,16 @@ async def get_pii_access(
     return await ScopeService(db).can_view_pii(ctx)
 
 
+async def get_payroll_access(
+    ctx: RequestContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> bool:
+    """True → caller may see salary payouts (salary:list) inside other screens, e.g. the staff profile."""
+    from app.services.scope_service import ScopeService
+
+    return await ScopeService(db).can_view_payroll(ctx)
+
+
 async def require_superadmin(ctx: RequestContext = Depends(get_current_user)) -> RequestContext:
     if not ctx.is_superadmin:
         raise PermissionDeniedError("Platform superadmin access required")

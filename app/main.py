@@ -33,15 +33,69 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     )
 
 
+# Words kept in capitals when a field name becomes a label ("pan_number" → "PAN number").
+_ACRONYMS = {"pan": "PAN", "ifsc": "IFSC", "upi": "UPI", "id": "ID", "pt": "PT"}
+# Field names whose plain humanised form reads badly.
+_LABELS = {"phone": "Phone number", "dob": "Date of birth",
+           "morning_start": "Morning shift start time", "morning_end": "Morning shift end time",
+           "evening_start": "Evening shift start time", "evening_end": "Evening shift end time"}
+
+
+def _field_label(loc: tuple) -> str:
+    """Last named part of the error location as a sentence-case label: payment.paid_amount → "Paid amount"."""
+    parts = [str(p) for p in loc if p not in ("body", "query", "path") and not isinstance(p, int)]
+    if not parts:
+        return "Request"
+    if parts[-1] in _LABELS:
+        return _LABELS[parts[-1]]
+    words = [_ACRONYMS.get(w, w) for w in parts[-1].split("_")]
+    label = " ".join(words)
+    return label[0].upper() + label[1:]
+
+
+def _num(value: object) -> object:
+    """0.0 → 0, 10000000.0 → 10,000,000 (limits read like the UI shows them)."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return f"{value:,}" if isinstance(value, int) else value
+
+
+def _mid_sentence(label: str) -> str:
+    """"Paid amount" → "paid amount", but "PAN number" stays (leading acronym)."""
+    first = label.split(" ", 1)[0]
+    return label if first.isupper() and len(first) > 1 else label[0].lower() + label[1:]
+
+
+def _validation_message(error: dict) -> str:
+    """One readable sentence per Pydantic error type — this is what the UI shows in its toast."""
+    label, kind, ctx = _field_label(error.get("loc", ())), error.get("type", ""), error.get("ctx") or {}
+    if (kind == "missing" or (kind == "string_too_short" and ctx.get("min_length") == 1)
+            or (kind.endswith("_type") and error.get("input") is None)):   # null sent for a required field
+        return f"{label} is required"
+    if kind == "string_too_short":
+        return f"{label} must be at least {ctx.get('min_length')} characters"
+    if kind == "string_too_long":
+        return f"{label} must be at most {ctx.get('max_length')} characters"
+    if kind in ("greater_than_equal", "greater_than"):
+        return f"{label} must be at least {_num(ctx.get('ge', ctx.get('gt')))}"
+    if kind in ("less_than_equal", "less_than"):
+        return f"{label} must be at most {_num(ctx.get('le', ctx.get('lt')))}"
+    if kind in ("enum", "literal_error"):
+        return f"Choose a valid {_mid_sentence(label)}"
+    if kind == "value_error":
+        # Custom validators (e.g. EmailStr) — drop Pydantic's "Value error, " prefix.
+        if "email" in label.lower():
+            return "Enter a valid email address"
+        return f"{label}: {str(error.get('msg', '')).removeprefix('Value error, ')}"
+    if kind.endswith("_parsing") or kind.endswith("_type") or kind == "string_pattern_mismatch":
+        return f"Enter a valid {_mid_sentence(label)}"
+    return f"{label}: {error.get('msg', 'Invalid value')}"
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     errors = exc.errors()
-    if errors:
-        first = errors[0]
-        field = ".".join(str(p) for p in first.get("loc", []) if p not in ("body", "query", "path")) or "request"
-        message = f"{field}: {first.get('msg', 'Invalid value')}"
-    else:
-        message = "Validation error"
+    message = _validation_message(errors[0]) if errors else "Validation error"
     return JSONResponse(status_code=422, content={"success": False, "status_code": 422, "message": message})
 
 

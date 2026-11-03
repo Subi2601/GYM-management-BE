@@ -32,6 +32,7 @@ class Employee(BranchScopedMixin, BaseModel):
     # PII — Fernet-encrypted, masked for callers without pii:view
     aadhar_number_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     pan_number_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Legacy: no longer captured or returned by the API (kept so existing data isn't dropped).
     id_proof_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     id_proof_number_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     emergency_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -42,6 +43,7 @@ class Employee(BranchScopedMixin, BaseModel):
     bank_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     bank_account_number_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     ifsc_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    upi_id: Mapped[str | None] = mapped_column(String(100), nullable=True)   # e.g. name@okaxis
     status: Mapped[EmployeeStatus] = mapped_column(
         Enum(EmployeeStatus, name="employee_status"), nullable=False,
         default=EmployeeStatus.ACTIVE, server_default=text("'ACTIVE'"),
@@ -49,6 +51,11 @@ class Employee(BranchScopedMixin, BaseModel):
     average_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     date_of_joining: Mapped[date] = mapped_column(Date, nullable=False)
     date_of_termination: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Work timings: gyms run a morning and an evening session; a split shift fills both pairs.
+    morning_start: Mapped[time | None] = mapped_column(Time, nullable=True)
+    morning_end: Mapped[time | None] = mapped_column(Time, nullable=True)
+    evening_start: Mapped[time | None] = mapped_column(Time, nullable=True)
+    evening_end: Mapped[time | None] = mapped_column(Time, nullable=True)
 
 
 class EmployeeFeedback(BranchScopedMixin, BaseModel):

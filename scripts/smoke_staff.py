@@ -51,11 +51,18 @@ def employee_body(**overrides) -> dict:
     body = {
         "name": "Smoke Staff", "phone": phone(), "email": "staff@example.com", "address": "1 Gym Road",
         "role": "TRAINER", "aadhar_number": "1234 5678 9012", "pan_number": "abcde1234f",
-        "id_proof_type": "Aadhar", "id_proof_number": "ID99887766", "emergency_contact_name": "Kin",
-        "emergency_contact_phone": "9000000001", "emergency_contact_relation": "Brother",
-        "base_salary": 28000, "bank_name": "SBI", "bank_account_number": "001122334455",
-        "ifsc_code": "sbin0001234", "date_of_joining": "2025-01-01", "education": "", "experience": "2 years",
+        "emergency_contact_name": "Kin", "emergency_contact_phone": "9000000001",
+        "emergency_contact_relation": "Brother", "date_of_joining": "2025-01-01", "education": "",
+        "experience": "2 years", "morning_start": "06:00", "morning_end": "10:00",
+        "evening_start": "17:00", "evening_end": "21:00",
     }
+    body.update(overrides)
+    return body
+
+
+def payroll_body(**overrides) -> dict:
+    body = {"base_salary": 28000, "bank_name": "SBI", "bank_account_number": "001122334455",
+            "ifsc_code": "sbin0001234"}
     body.update(overrides)
     return body
 
@@ -77,23 +84,52 @@ def main() -> None:
     # ── employees: create + code sequence + PII ──────────────────────────
     e1 = check("create employee 1 (trainer role)", owner.post("/api/v1/employees", json=employee_body(
         name="Smoke Trainer"),), 201)["data"]
-    e2 = check("create employee 2 (cleaner)", owner.post("/api/v1/employees", json=employee_body(
-        name="Smoke Cleaner", role="CLEANER", base_salary=10000)), 201)["data"]
+    e2 = check("create employee 2 (cleaner, no identity / emergency)", owner.post("/api/v1/employees", json={
+        k: v for k, v in employee_body(name="Smoke Cleaner", role="CLEANER").items()
+        if k not in ("aadhar_number", "pan_number", "emergency_contact_name", "emergency_contact_phone",
+                     "emergency_contact_relation")}), 201)["data"]
     e3 = check("create employee 3 by trainer (no pii:view)", trainer.post("/api/v1/employees", json=employee_body(
-        name="Smoke Helper", role="SERVICE_STAFF", base_salary=12000)), 201)["data"]
+        name="Smoke Helper", role="SERVICE_STAFF")), 201)["data"]
     expect("code format SG-EMP-###", bool(re.fullmatch(r"SG-EMP-\d{3,}", e1["employee_code"])), e1["employee_code"])
     expect("code sequence +1", code_num(e2["employee_code"]) == code_num(e1["employee_code"]) + 1,
            (e1["employee_code"], e2["employee_code"]))
     expect("code sequence +2 (trainer)", code_num(e3["employee_code"]) == code_num(e1["employee_code"]) + 2,
            e3["employee_code"])
+    expect("new employee has no payroll yet", e1["base_salary"] == 0.0 and e1["bank_name"] is None
+           and e1["bank_account_number"] is None, e1)
+    expect("shift times returned", e1["morning_start"] == "06:00:00" and e1["evening_end"] == "21:00:00", e1)
+    expect("identity and emergency are optional", e2["aadhar_number"] is None and e2["pan_number"] is None
+           and e2["emergency_contact_name"] is None, e2)
+    expect("id proof no longer in the API", "id_proof_type" not in e1 and "id_proof_number" not in e1, e1)
+
+    # ── payroll & bank (separate form) ───────────────────────────────────
+    e1 = check("set payroll 1", owner.put(f"/api/v1/employees/{e1['id']}/payroll", json=payroll_body()))["data"]
+    e2 = check("set payroll 2 (cash, no bank)", owner.put(f"/api/v1/employees/{e2['id']}/payroll", json={
+        "base_salary": 10000}))["data"]
+    e3 = check("set payroll 3", owner.put(f"/api/v1/employees/{e3['id']}/payroll",
+                                          json=payroll_body(base_salary=12000)))["data"]
     expect("owner sees plain PII", e1["aadhar_number"] == "123456789012" and e1["pan_number"] == "ABCDE1234F"
-           and e1["bank_account_number"] == "001122334455" and e1["id_proof_number"] == "ID99887766", e1)
+           and e1["bank_account_number"] == "001122334455", e1)
     expect("IFSC uppercased", e1["ifsc_code"] == "SBIN0001234", e1["ifsc_code"])
-    expect("trainer sees masked PII on create", e3["aadhar_number"] == "XXXX-XXXX-9012"
-           and e3["pan_number"] == "XXXX-XXXX-234F" and e3["bank_account_number"] == "XXXX-XXXX-4455", e3)
-    t_view = check("trainer get employee", trainer.get(f"/api/v1/employees/{e1['id']}"))["data"]
+    expect("payroll without bank", e2["base_salary"] == 10000.0 and e2["bank_name"] is None, e2)
+    t_view = check("trainer get employee", trainer.get(f"/api/v1/employees/{e3['id']}"))["data"]
     expect("trainer sees masked PII", t_view["aadhar_number"] == "XXXX-XXXX-9012"
-           and t_view["id_proof_number"] == "XXXX-XXXX-7766", t_view)
+           and t_view["pan_number"] == "XXXX-XXXX-234F" and t_view["bank_account_number"] == "XXXX-XXXX-4455", t_view)
+    kept = check("payroll without account number keeps it", owner.put(f"/api/v1/employees/{e1['id']}/payroll", json={
+        "base_salary": 28000, "bank_name": "SBI", "ifsc_code": "SBIN0001234"}))["data"]
+    expect("stored account kept", kept["bank_account_number"] == "001122334455", kept)
+    check("bank details go together", owner.put(f"/api/v1/employees/{e2['id']}/payroll", json={
+        "base_salary": 10000, "bank_name": "SBI"}), 422)
+    check("bad IFSC", owner.put(f"/api/v1/employees/{e1['id']}/payroll", json=payroll_body(ifsc_code="SBIN1001234")), 422)
+    upi = check("payroll with UPI", owner.put(f"/api/v1/employees/{e1['id']}/payroll",
+                                              json=payroll_body(upi_id=" Ravi.Kumar@OKAXIS ")))["data"]
+    expect("UPI stored lower-cased", upi["upi_id"] == "ravi.kumar@okaxis", upi)
+    bad_upi = owner.put(f"/api/v1/employees/{e1['id']}/payroll", json=payroll_body(upi_id="ravi.kumar"))
+    expect("bad UPI → readable 422", bad_upi.status_code == 422 and bad_upi.json()["message"] == "Enter a valid UPI ID",
+           bad_upi.text)
+    check("email over 150 chars", owner.post("/api/v1/employees", json=employee_body(
+        email=("a" * 145) + "@x.com")), 422)
+    check("negative salary", owner.put(f"/api/v1/employees/{e1['id']}/payroll", json=payroll_body(base_salary=-1)), 422)
     o_view = check("owner get employee", owner.get(f"/api/v1/employees/{e3['id']}"))["data"]
     expect("owner sees plain PII of trainer-created row", o_view["pan_number"] == "ABCDE1234F", o_view)
     expect("default status ACTIVE", e1["status"] == "ACTIVE" and e1["base_salary"] == 28000.0, e1)
@@ -101,21 +137,35 @@ def main() -> None:
     # ── validation ───────────────────────────────────────────────────────
     check("bad PAN", owner.post("/api/v1/employees", json=employee_body(pan_number="ABCD1234F")), 422)
     check("bad Aadhaar", owner.post("/api/v1/employees", json=employee_body(aadhar_number="12345678901")), 422)
-    check("bad IFSC", owner.post("/api/v1/employees", json=employee_body(ifsc_code="SBIN1001234")), 422)
     check("bad phone", owner.post("/api/v1/employees", json=employee_body(phone="12345")), 422)
-    check("negative salary", owner.post("/api/v1/employees", json=employee_body(base_salary=-1)), 422)
-    body = employee_body()
-    body.pop("bank_name")
-    check("missing bank name", owner.post("/api/v1/employees", json=body), 422)
     check("blank address", owner.post("/api/v1/employees", json=employee_body(address="  ")), 422)
     check("duplicate phone", owner.post("/api/v1/employees", json=employee_body(phone=e1["phone"])), 409)
+    check("no shift at all", owner.post("/api/v1/employees", json=employee_body(
+        morning_start=None, morning_end=None, evening_start=None, evening_end=None)), 422)
+    check("evening shift required", owner.post("/api/v1/employees", json=employee_body(
+        evening_start=None, evening_end=None)), 422)
+    check("shift needs both times", owner.post("/api/v1/employees", json=employee_body(evening_end=None)), 422)
+    check("bad emergency phone still rejected", owner.post("/api/v1/employees", json=employee_body(
+        emergency_contact_phone="123")), 422)
+    check("shift ends after it starts", owner.post("/api/v1/employees", json=employee_body(
+        morning_start="10:00", morning_end="06:00")), 422)
+    check("morning ends before evening", owner.post("/api/v1/employees", json=employee_body(
+        morning_end="18:00")), 422)
 
     # ── update ───────────────────────────────────────────────────────────
     upd = check("update employee (partial)", owner.put(f"/api/v1/employees/{e2['id']}", json={
         "name": "Smoke Cleaner II", "experience": "5 years", "pan_number": "zzzzz9999z"}))["data"]
     expect("update applied, others kept", upd["name"] == "Smoke Cleaner II" and upd["experience"] == "5 years"
            and upd["pan_number"] == "ZZZZZ9999Z" and upd["phone"] == e2["phone"] and upd["base_salary"] == 10000, upd)
-    check("update bad IFSC", owner.put(f"/api/v1/employees/{e2['id']}", json={"ifsc_code": "BAD"}), 422)
+    shifted = check("update evening shift", owner.put(f"/api/v1/employees/{e2['id']}", json={
+        "evening_start": "16:30", "evening_end": "20:30"}))["data"]
+    expect("evening shift saved", shifted["evening_start"] == "16:30:00" and shifted["morning_start"] == "06:00:00",
+           shifted)
+    check("update clearing a shift rejected", owner.put(f"/api/v1/employees/{e2['id']}", json={
+        "evening_start": None, "evening_end": None}), 422)
+    cleared = check("update clears optional PAN", owner.put(f"/api/v1/employees/{e2['id']}", json={
+        "pan_number": None}))["data"]
+    expect("PAN cleared", cleared["pan_number"] is None, cleared)
     check("update duplicate phone", owner.put(f"/api/v1/employees/{e2['id']}", json={"phone": e1["phone"]}), 409)
     check("update status TERMINATED rejected", owner.put(f"/api/v1/employees/{e2['id']}",
                                                          json={"status": "TERMINATED"}), 400)
@@ -140,10 +190,22 @@ def main() -> None:
     expect("feedback_date defaults today", fb["feedback"]["feedback_date"] == today, fb)
     check("rating 6 rejected", owner.post(f"/api/v1/employees/{e1['id']}/feedback",
                                           json={"client_name": "X", "rating": 6}), 422)
-    prof = check("profile", owner.get(f"/api/v1/employees/{e1['id']}/profile"))["data"]
-    expect("profile feedback newest first", [f["rating"] for f in prof["feedbacks"]] == [5, 4], prof["feedbacks"])
-    expect("profile average + pt_clients", prof["average_rating"] == 4.5 and isinstance(prof["pt_clients"], list)
+    prof = check("profile (trainer)", owner.get(f"/api/v1/employees/{e1['id']}/profile"))["data"]
+    training = prof.get("training") or {}
+    expect("trainer profile has training", [f["rating"] for f in training.get("feedbacks", [])] == [5, 4]
+           and training.get("average_rating") == 4.5 and isinstance(training.get("pt_clients"), list)
            and prof["employee"]["average_rating"] == 4.5, prof)
+    expect("profile attendance month", prof["attendance"]["month_year"] == date.today().strftime("%m-%Y")
+           and prof["attendance"]["days_elapsed"] == date.today().day, prof["attendance"])
+    expect("owner sees payroll in profile", (prof.get("payroll") or {}).get("base_salary") == 28000.0, prof.get("payroll"))
+    cprof = check("profile (cleaner)", owner.get(f"/api/v1/employees/{e2['id']}/profile"))["data"]
+    expect("cleaner profile has no training section", cprof["training"] is None, cprof)
+    tprof = check("profile as trainer (no salary:list)", trainer.get(f"/api/v1/employees/{e1['id']}/profile"))["data"]
+    expect("payroll hidden without salary:list", tprof["payroll"] is None, tprof.get("payroll"))
+    past = check("profile past month", owner.get(f"/api/v1/employees/{e1['id']}/profile",
+                                                 params={"month": 1, "year": 2025}))["data"]["attendance"]
+    expect("past month fully elapsed", past["month_year"] == "01-2025" and past["days_elapsed"] == 31, past)
+    check("profile bad month", owner.get(f"/api/v1/employees/{e1['id']}/profile", params={"month": 13}), 422)
 
     # ── attendance ───────────────────────────────────────────────────────
     a1 = check("mark PRESENT today", owner.post("/api/v1/attendance/mark", json={
@@ -159,6 +221,10 @@ def main() -> None:
     co = check("checkout", trainer.post(f"/api/v1/attendance/{e1['id']}/checkout"))["data"]
     expect("check-out set", co["check_out_time"] is not None, co)
     check("checkout twice", owner.post(f"/api/v1/attendance/{e1['id']}/checkout"), 400)
+    pa = check("profile after marking", owner.get(f"/api/v1/employees/{e1['id']}/profile"))["data"]["attendance"]
+    today_row = next((d for d in pa["days"] if d["date"] == today), None)
+    expect("profile shows today's LATE with in/out", pa["late"] >= 1 and today_row is not None
+           and today_row["status"] == "LATE" and today_row["check_in"] and today_row["check_out"], pa)
     daily = check("daily", owner.get("/api/v1/attendance/daily"))["data"]
     expect("daily has record with employee name", any(r["employee_id"] == e1["id"] and r["employee_name"] ==
                                                       "Smoke Trainer" for r in daily["records"]), daily["records"])
@@ -220,6 +286,9 @@ def main() -> None:
     expect("terminated today", term["status"] == "TERMINATED" and term["date_of_termination"] == today, term)
     check("terminate twice", owner.patch(f"/api/v1/employees/{e2['id']}/terminate"), 400)
     check("update terminated", owner.put(f"/api/v1/employees/{e2['id']}", json={"name": "X"}), 400)
+    check("payroll on terminated", owner.put(f"/api/v1/employees/{e2['id']}/payroll", json=payroll_body()), 400)
+    check("feedback on terminated", owner.post(f"/api/v1/employees/{e2['id']}/feedback", json={
+        "client_name": "Client X", "rating": 4, "comment": "late feedback"}), 400)
     check("mark attendance on terminated", owner.post("/api/v1/attendance/mark", json={
         "employee_id": e2["id"], "status": "PRESENT"}), 400)
     arch = check("archive list", owner.get("/api/v1/employees", params={"status": "archive", "search": e2["phone"]}))

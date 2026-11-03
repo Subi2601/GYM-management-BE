@@ -14,6 +14,7 @@ from app.repositories.user_repository import UserRepository
 from app.services.auth_service import SWITCH_BRANCH_PERMISSION
 
 PII_VIEW_PERMISSION = "pii:view"
+PAYROLL_VIEW_PERMISSION = "salary:list"
 
 
 class ScopeService:
@@ -51,3 +52,6 @@ class ScopeService:
 
     async def can_view_pii(self, ctx: RequestContext) -> bool:
         return ctx.is_superadmin or await self._rbac.has_permission(ctx.user_id, PII_VIEW_PERMISSION)
+
+    async def can_view_payroll(self, ctx: RequestContext) -> bool:
+        return ctx.is_superadmin or await self._rbac.has_permission(ctx.user_id, PAYROLL_VIEW_PERMISSION)
