@@ -9,6 +9,7 @@ from rbac.models import (  # noqa: F401
     UserRole,
 )
 
+from app.models.attendance import AttendanceDevice, AttendanceSession
 from app.models.base import Base, BaseModel, utcnow
 from app.models.billing import Payment, Plan, Subscription
 from app.models.diet import DietPlan, DietPlanItem, FoodItem
@@ -23,7 +24,7 @@ __all__ = [
     "Organization", "Branch", "User", "UserSession",
     "Member", "Lead", "Plan", "Subscription", "Payment",
     "PTSubscription", "PTSessionLog",
-    "Employee", "EmployeeFeedback", "Attendance", "Salary",
+    "Employee", "EmployeeFeedback", "Attendance", "Salary", "AttendanceSession", "AttendanceDevice",
     "FoodItem", "DietPlan", "DietPlanItem",
     "RBACModule", "RBACScreen", "RBACPermission", "RBACRole", "RBACRolePermission", "UserRole",
 ]

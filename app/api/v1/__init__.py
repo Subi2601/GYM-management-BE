@@ -2,6 +2,7 @@
 from app.api.v1.attendance import router as attendance_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.branches import router as branches_router
+from app.api.v1.checkin import router as checkin_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.diet import router as diet_router
 from app.api.v1.employees import router as employees_router
@@ -27,6 +28,7 @@ ROUTERS = [
     training_router,
     employees_router,
     attendance_router,
+    checkin_router,
     salary_router,
     foods_router,
     diet_router,

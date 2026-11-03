@@ -134,6 +134,18 @@ class AttendanceStatus(str, enum.Enum):
     ON_LEAVE = "ON_LEAVE"
 
 
+class AttendancePersonType(str, enum.Enum):
+    """Who an attendance session / linked phone belongs to — the two tabs of the attendance screen."""
+    STAFF = "STAFF"
+    MEMBER = "MEMBER"
+
+
+class AttendanceSource(str, enum.Enum):
+    """How a check-in / check-out was recorded."""
+    MANUAL = "MANUAL"     # front desk, from the attendance screen
+    QR = "QR"             # the person scanned the branch's CHECK IN / CHECK OUT poster
+
+
 class SalaryStatus(str, enum.Enum):
     PENDING = "PENDING"
     PAID = "PAID"

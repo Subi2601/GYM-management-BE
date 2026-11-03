@@ -96,6 +96,12 @@ class MemberRepository(BaseRepository):
                                            Member.registration_id.op("~")(r"^SG-\d+$"))
         return (await self._db.execute(stmt)).scalar_one() or 0
 
+    async def membership_end(self, member_id: UUID) -> date | None:
+        """End date of the member's latest membership (None = never subscribed)."""
+        latest = self._latest_membership()
+        stmt = select(latest.c.end_date).where(latest.c.member_id == member_id)
+        return (await self._db.execute(stmt)).scalar_one_or_none()
+
     async def has_subscriptions(self, member_id: UUID) -> bool:
         stmt = select(Subscription.id).where(Subscription.member_id == member_id,
                                              Subscription.is_delete.is_(False)).limit(1)

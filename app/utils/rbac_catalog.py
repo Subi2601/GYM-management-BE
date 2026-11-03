@@ -61,6 +61,7 @@ CATALOG: list[tuple] = [
         ]),
         ("attendance", "Attendance", "/attendance", 20, [
             ("attendance:list", "View attendance"), ("attendance:mark", "Mark attendance / checkout"),
+            ("attendance:qr", "Manage attendance QR codes, gym location and linked phones"),
         ]),
         ("payroll", "Payroll & Salary", "/salary", 30, [
             ("salary:list", "View payroll"), ("salary:calculate", "Calculate salary"),

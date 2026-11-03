@@ -36,7 +36,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 # Words kept in capitals when a field name becomes a label ("pan_number" → "PAN number").
 _ACRONYMS = {"pan": "PAN", "ifsc": "IFSC", "upi": "UPI", "id": "ID", "pt": "PT"}
 # Field names whose plain humanised form reads badly.
-_LABELS = {"phone": "Phone number", "dob": "Date of birth",
+_LABELS = {"phone": "Phone number", "dob": "Date of birth", "geofence_m": "Check-in radius (m)",
            "morning_start": "Morning shift start time", "morning_end": "Morning shift end time",
            "evening_start": "Evening shift start time", "evening_end": "Evening shift end time"}
 
@@ -124,7 +124,8 @@ app.add_middleware(
     AuthMiddleware,
     token_manager=get_token_manager,  # lazy — secret decrypted on first request
     skip_paths=_PUBLIC_PATHS,
-    skip_prefixes=["/docs", "/redoc", "/openapi.json"],
+    # /api/v1/public/: QR check-in from members' and staff phones (no login; scoped by the poster token).
+    skip_prefixes=["/docs", "/redoc", "/openapi.json", "/api/v1/public/"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
@@ -159,7 +160,7 @@ def _openapi_with_bearer():
     schema["security"] = [{"BearerAuth": []}]
     for path, methods in schema.get("paths", {}).items():
         for operation in methods.values():
-            if path in _PUBLIC_PATHS:
+            if path in _PUBLIC_PATHS or path.startswith("/api/v1/public/"):
                 operation["security"] = []
     app.openapi_schema = schema
     return schema
