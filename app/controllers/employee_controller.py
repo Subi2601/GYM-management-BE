@@ -13,13 +13,29 @@ from app.core.enums import EmployeeRole
 from app.core.scope import BranchScope
 from app.dependencies import get_db
 from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeePayrollUpdate, EmployeeProfileResponse,
-                                  EmployeeResponse, EmployeeUpdate, FeedbackCreate, FeedbackCreated, TrainerOption)
+                                  EmployeeResponse, EmployeeUpdate, FeedbackCreate, FeedbackCreated, StaffLoginResponse,
+                                  StaffLoginSave, TrainerOption)
 from app.services.employee_service import EmployeeService
+from app.services.staff_login_service import StaffLoginService
 
 
 class EmployeeController:
     def __init__(self, db: AsyncSession = Depends(get_db)) -> None:
         self._service = EmployeeService(db)
+        self._logins = StaffLoginService(db)
+
+    async def get_login(self, employee_id: UUID, scope: BranchScope) -> ResponseEnvelope[StaffLoginResponse]:
+        return ResponseEnvelope.ok(StaffLoginResponse(**await self._logins.get_login(employee_id, scope)))
+
+    async def save_login(self, employee_id: UUID, body: StaffLoginSave, scope: BranchScope,
+                         ctx: RequestContext) -> ResponseEnvelope[StaffLoginResponse]:
+        data, message = await self._logins.save_login(employee_id, body, scope, ctx)
+        return ResponseEnvelope.ok(StaffLoginResponse(**data), message=message)
+
+    async def disable_login(self, employee_id: UUID, scope: BranchScope,
+                            ctx: RequestContext) -> ResponseEnvelope[StaffLoginResponse]:
+        data = await self._logins.disable_login(employee_id, scope, ctx)
+        return ResponseEnvelope.ok(StaffLoginResponse(**data), message="Login disabled")
 
     async def list_employees(self, scope: BranchScope, pagination: PaginationParams, status_filter: str,
                              role: EmployeeRole | None, search: str | None, sort_by: str | None,

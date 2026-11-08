@@ -15,7 +15,8 @@ from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user, get_payroll_access, get_pii_access
 from app.schemas.common import SortDir
 from app.schemas.employee import (EmployeeCounts, EmployeeCreate, EmployeePayrollUpdate, EmployeeProfileResponse,
-                                  EmployeeResponse, EmployeeUpdate, FeedbackCreate, FeedbackCreated, TrainerOption)
+                                  EmployeeResponse, EmployeeUpdate, FeedbackCreate, FeedbackCreated, StaffLoginResponse,
+                                  StaffLoginSave, TrainerOption)
 
 router = APIRouter(prefix="/api/v1/employees", tags=["employees"])
 
@@ -94,6 +95,29 @@ async def update_payroll(employee_id: UUID, body: EmployeePayrollUpdate,
                          ctx: RequestContext = Depends(get_current_user),
                          show_pii: bool = Depends(get_pii_access), controller: EmployeeController = Depends()):
     return await controller.update_payroll(employee_id, body, scope, ctx, show_pii)
+
+
+@router.get("/{employee_id}/login", response_model=ResponseEnvelope[StaffLoginResponse],
+            dependencies=[Depends(require_permission("employee:login"))])
+async def get_staff_login(employee_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+                          controller: EmployeeController = Depends()):
+    return await controller.get_login(employee_id, scope)
+
+
+@router.put("/{employee_id}/login", response_model=ResponseEnvelope[StaffLoginResponse],
+            dependencies=[Depends(require_permission("employee:login"))])
+async def save_staff_login(employee_id: UUID, body: StaffLoginSave, scope: BranchScope = Depends(get_branch_scope),
+                           ctx: RequestContext = Depends(get_current_user), controller: EmployeeController = Depends()):
+    """Create the login (password required) or change role / reset password / re-enable it."""
+    return await controller.save_login(employee_id, body, scope, ctx)
+
+
+@router.delete("/{employee_id}/login", response_model=ResponseEnvelope[StaffLoginResponse],
+               dependencies=[Depends(require_permission("employee:login"))])
+async def disable_staff_login(employee_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+                              ctx: RequestContext = Depends(get_current_user),
+                              controller: EmployeeController = Depends()):
+    return await controller.disable_login(employee_id, scope, ctx)
 
 
 @router.patch("/{employee_id}/terminate", response_model=ResponseEnvelope[EmployeeResponse],

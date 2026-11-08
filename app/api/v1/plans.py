@@ -26,19 +26,25 @@ async def list_plans(
     search: str | None = Query(default=None, max_length=100),
     type: PlanType | None = Query(default=None),
     service_type: PlanServiceType | None = Query(default=None),
+    category_id: UUID | None = Query(default=None),
+    active_only: bool = Query(default=False, description="Only plans shown for billing (plan and category on)"),
+    status: Literal["active", "inactive"] | None = Query(default=None, description="Active / Inactive tab"),
     sort_by: Literal["name", "type", "service_type", "duration_days", "price",
                      "created_at"] | None = Query(default=None),
     sort_dir: SortDir = Query(default="desc"),
     scope: BranchScope = Depends(get_branch_scope),
     controller: PlanController = Depends(),
 ):
-    return await controller.list_plans(scope, pagination, search, type, service_type, sort_by, sort_dir)
+    return await controller.list_plans(scope, pagination, search, type, service_type, category_id, active_only,
+                                       sort_by, sort_dir, status)
 
 
 @router.get("/counts", response_model=ResponseEnvelope[PlanCounts],
             dependencies=[Depends(require_permission("plan:list"))])
-async def plan_counts(scope: BranchScope = Depends(get_branch_scope), controller: PlanController = Depends()):
-    return await controller.counts(scope)
+async def plan_counts(search: str | None = Query(default=None, max_length=100),
+                      category_id: UUID | None = Query(default=None),
+                      scope: BranchScope = Depends(get_branch_scope), controller: PlanController = Depends()):
+    return await controller.counts(scope, search, category_id)
 
 
 @router.get("/{plan_id}", response_model=ResponseEnvelope[PlanResponse],

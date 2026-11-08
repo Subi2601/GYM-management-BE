@@ -17,6 +17,7 @@ from app.models.staff import Employee, EmployeeFeedback
 from app.repositories.attendance_repository import AttendanceRepository
 from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.salary_repository import SalaryRepository
+from app.services.staff_login_service import StaffLoginService
 
 _SHIFT_FIELDS = ("morning_start", "morning_end", "evening_start", "evening_end")
 # Profile fields set by create / update. Payroll and bank details have their own command (update_payroll).
@@ -63,6 +64,7 @@ def _rating(value: float | None) -> float | None:
 
 class EmployeeService:
     def __init__(self, db: AsyncSession) -> None:
+        self._db = db
         self._repo = EmployeeRepository(db)
         self._attendance = AttendanceRepository(db)
         self._salaries = SalaryRepository(db)
@@ -226,6 +228,8 @@ class EmployeeService:
             if field in sent:
                 setattr(employee, column, encrypt_pii(getattr(data, field)))
         employee.updated_by = actor.user_id
+        if sent & {"email", "name", "role"}:
+            await StaffLoginService(self._db).sync_from_employee(employee, actor.user_id)
         await self._repo.commit()
         return await self.get_employee(employee.id, scope, show_pii)
 
@@ -257,6 +261,7 @@ class EmployeeService:
         employee.status = EmployeeStatus.TERMINATED
         employee.date_of_termination = timeutil.today()
         employee.updated_by = actor.user_id
+        await StaffLoginService(self._db).disable_for_employee(employee.id, actor.user_id)
         await self._repo.commit()
         return await self.get_employee(employee.id, scope, show_pii)
 

@@ -15,7 +15,7 @@ from app.dependencies import get_db
 from app.schemas.attendance import (AttendanceLocationUpdate, AttendanceMark, AttendanceQrResponse,
                                     AttendanceResponse, CheckinInfoResponse, CheckinPerson, CheckinScan,
                                     CheckinVerify, CheckResult, DailyAttendanceResponse, LinkedDeviceResponse,
-                                    MemberDailyResponse, MonthlyAttendanceResponse)
+                                    MemberDailyResponse, MonthlyAttendanceResponse, VisitingMember)
 from app.services.attendance_service import AttendanceService, clock
 from app.services.checkin_service import CheckinService
 
@@ -27,7 +27,8 @@ DEVICE_COOKIE_MAX_AGE = 400 * 24 * 3600     # browsers cap cookie lifetime at ~4
 def _result_message(r: dict) -> str:
     """Toast / scan-screen text for a check-in or check-out."""
     if r["direction"] == "IN":
-        return f"{r['name']} checked in at {clock(r['time'])}" + (" (late)" if r["late"] else "")
+        return f"{r['name']} checked in at {clock(r['time'])}" + (
+            " (late: half day)" if r.get("half_day") else " (late)" if r["late"] else "")
     minutes = r["duration_minutes"] or 0
     return f"{r['name']} checked out at {clock(r['time'])} after {minutes // 60}h {minutes % 60}m"
 
@@ -58,6 +59,9 @@ class AttendanceController:
     # ── members ──────────────────────────────────────────────────────────
     async def members_daily(self, scope: BranchScope, day: date | None) -> ResponseEnvelope[MemberDailyResponse]:
         return ResponseEnvelope.ok(MemberDailyResponse(**await self._service.members_daily(scope, day)))
+
+    async def visitors(self, scope: BranchScope) -> ResponseEnvelope[list[VisitingMember]]:
+        return ResponseEnvelope.ok([VisitingMember(**v) for v in await self._service.visitors(scope)])
 
     async def member_check_in(self, member_id: UUID, scope: BranchScope,
                               ctx: RequestContext) -> ResponseEnvelope[CheckResult]:

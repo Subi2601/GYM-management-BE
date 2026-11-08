@@ -25,14 +25,17 @@ def _round(value: Decimal) -> Decimal:
     return value.quantize(_CENT, rounding=ROUND_HALF_UP)
 
 
-def compute_salary(base: Decimal, days_in_month: int, present: int, absent: int) -> dict[str, Decimal]:
+def compute_salary(base: Decimal, days_in_month: int, present: int, absent: int,
+                   half_days: int = 0) -> dict[str, Decimal]:
     """Original rule: per-day = base / days-in-month; deductions = per-day × absent;
-    till-now = per-day × present; net = base − deductions. Rounded to 2 dp."""
+    till-now = per-day × present; net = base − deductions. A half day (came very late) costs half a day's pay
+    and earns the other half. Rounded to 2 dp."""
     base = Decimal(base or 0)
     per_day = base / Decimal(days_in_month)
-    deductions = _round(per_day * absent)
+    half = Decimal(half_days) / 2
+    deductions = _round(per_day * (absent + half))
     return {"base_salary": _round(base), "deductions": deductions,
-            "till_now_salary": _round(per_day * present), "net_salary": _round(base - deductions)}
+            "till_now_salary": _round(per_day * (present + half)), "net_salary": _round(base - deductions)}
 
 
 def _parse_month_year(month_year: str) -> tuple[int, int]:
@@ -118,11 +121,12 @@ class SalaryService:
             present = days.get(AttendanceStatus.PRESENT, 0)
             absent = days.get(AttendanceStatus.ABSENT, 0)
             late = days.get(AttendanceStatus.LATE, 0)
+            half_days = days.get(AttendanceStatus.HALF_DAY, 0)
             if salary is None:
                 salary = await self._repo.add(Salary(
                     organization_id=employee.organization_id, branch_id=employee.branch_id,
                     employee_id=employee.id, month_year=month_year, base_salary=0, created_by=actor.user_id))
-            for field, value in compute_salary(employee.base_salary, end.day, present, absent).items():
+            for field, value in compute_salary(employee.base_salary, end.day, present, absent, half_days).items():
                 setattr(salary, field, value)
             salary.days_present, salary.days_absent, salary.days_late = present, absent, late
             salary.bonus = Decimal("0")

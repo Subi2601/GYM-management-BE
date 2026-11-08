@@ -1,14 +1,14 @@
 """Pydantic v2 schemas — employees, client feedback, trainer PT clients."""
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Annotated, Any
 from uuid import UUID
 
 from pydantic import BeforeValidator, EmailStr, Field
 from shared.schemas.base_schema import TessBaseSchema, TimestampMixin, UUIDSchema
 
-from app.core.enums import AttendanceStatus, EmployeeRole, EmployeeStatus, FitnessGoal, PTStatus, SalaryStatus
+from app.core.enums import AccountRole, AttendanceStatus, EmployeeRole, EmployeeStatus, FitnessGoal, PTStatus, SalaryStatus
 from app.schemas.common import FormSchema, Phone
 
 
@@ -86,6 +86,29 @@ class EmployeeUpdate(FormSchema):
     morning_end: time | None = None
     evening_start: time | None = None
     evening_end: time | None = None
+
+
+class StaffLoginSave(FormSchema):
+    """Create / reset a staff member's app login. Password: required to create, optional after (= reset).
+    Login ID = the employee's email. `role_id` = the gym role it gets (default: Manager for admin / manager staff,
+    otherwise Staff); it must be below the caller's own level. `role` is ignored (kept for clients)."""
+    role: AccountRole | None = None
+    role_id: UUID | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=72)
+
+
+class StaffLoginResponse(TessBaseSchema):
+    employee_id: UUID
+    has_login: bool
+    enabled: bool
+    email: str | None = None          # the login ID (the employee's email)
+    role: AccountRole
+    role_id: UUID | None = None       # the gym role (Roles & Access)
+    role_name: str | None = None
+    role_level: int | None = None
+    branch_id: UUID
+    branch_name: str
+    last_login_at: datetime | None = None
 
 
 class EmployeePayrollUpdate(FormSchema):

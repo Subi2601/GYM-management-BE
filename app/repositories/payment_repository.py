@@ -120,3 +120,8 @@ class PaymentRepository(BaseRepository):
 
     async def get_member(self, member_id: UUID) -> Member:
         return (await self._db.execute(select(Member).where(Member.id == member_id))).scalar_one()
+
+    async def get_payment_unscoped(self, payment_id: UUID) -> Payment | None:
+        """For signed public links only — the caller has no branch scope."""
+        stmt = self.alive(Payment, select(Payment).where(Payment.id == payment_id))
+        return (await self._db.execute(stmt)).scalar_one_or_none()

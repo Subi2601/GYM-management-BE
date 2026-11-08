@@ -9,6 +9,7 @@ from app.core.enums import MEMBERSHIP_PLAN_TYPES, LeadStatus
 from app.core.scope import BranchScope
 from app.models.billing import Payment, Plan, Subscription
 from app.models.member import Lead, Member
+from app.models.membership import Refund
 from app.repositories.base import BaseRepository
 
 
@@ -41,9 +42,14 @@ class DashboardRepository(BaseRepository):
         return (await self._db.execute(self.scoped(Member, stmt, scope))).scalar_one()
 
     async def revenue(self, scope: BranchScope, today: date):
+        """(total, today) collected minus refunds paid back."""
         stmt = select(func.coalesce(func.sum(Payment.paid_amount), 0),
                       func.coalesce(func.sum(Payment.paid_amount).filter(Payment.payment_date == today), 0))
-        return (await self._db.execute(self.scoped(Payment, stmt, scope))).one()
+        total, today_sum = (await self._db.execute(self.scoped(Payment, stmt, scope))).one()
+        rstmt = select(func.coalesce(func.sum(Refund.amount), 0),
+                       func.coalesce(func.sum(Refund.amount).filter(Refund.refund_date == today), 0))
+        r_total, r_today = (await self._db.execute(self.scoped(Refund, rstmt, scope))).one()
+        return total - r_total, today_sum - r_today
 
     async def count_open_leads(self, scope: BranchScope) -> int:
         stmt = self.scoped(Lead, select(func.count(Lead.id))
@@ -57,7 +63,14 @@ class DashboardRepository(BaseRepository):
         return {m: n for m, n in (await self._db.execute(stmt)).all()}
 
     async def revenue_by_month(self, scope: BranchScope, since: date) -> dict[date, object]:
+        """Collected minus refunded, per month."""
         month = cast(func.date_trunc(_MONTH, Payment.payment_date), Date)
         stmt = self.scoped(Payment, select(month, func.sum(Payment.paid_amount))
                            .where(Payment.payment_date >= since).group_by(month), scope)
-        return {m: v for m, v in (await self._db.execute(stmt)).all()}
+        out = {m: v for m, v in (await self._db.execute(stmt)).all()}
+        r_month = cast(func.date_trunc(_MONTH, Refund.refund_date), Date)
+        rstmt = self.scoped(Refund, select(r_month, func.sum(Refund.amount))
+                            .where(Refund.refund_date >= since).group_by(r_month), scope)
+        for m, v in (await self._db.execute(rstmt)).all():
+            out[m] = (out.get(m) or 0) - v
+        return out

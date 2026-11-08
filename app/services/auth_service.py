@@ -13,6 +13,7 @@ from app.config import settings
 from app.core.auth import REFRESH_TTL_SECONDS, create_access_token, create_refresh_token, decode_refresh_token
 from app.core.security import hash_password, verify_password
 from app.models.user import UserSession
+from app.repositories.role_repository import RoleRepository
 from app.repositories.organization_repository import OrganizationRepository
 from app.repositories.user_repository import UserRepository
 
@@ -94,18 +95,25 @@ class AuthService:
         tree = await self._rbac.get_user_access(user_id)
         permissions = sorted({p["code"] for m in tree["access"] for s in m["screens"] for p in s["permissions"]})
         can_switch = user.is_superadmin or SWITCH_BRANCH_PERMISSION in permissions
-        org_name = None
+        org_name = org_code = org_logo = None
         branches: list[dict] = []
         if user.organization_id:
             org = await self._orgs.get_organization(user.organization_id)
-            org_name = org.name if org else None
+            org_name, org_code = (org.name, org.code) if org else (None, None)
+            if org is not None:
+                from app.services.gym_profile_service import GymProfileService
+                org_logo = (await GymProfileService(self._users._db).links(org))["logo_url"]
             all_branches = await self._orgs.list_branches(user.organization_id)
             visible = all_branches if can_switch else [b for b in all_branches if b.id == user.branch_id]
             branches = [{"id": b.id, "branch_name": b.branch_name, "location": b.location} for b in visible]
+        login_role = max(await RoleRepository(self._users._db).user_roles(user.id), key=lambda r: r.level, default=None)
         return {
             "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role,
+                     "role_name": login_role.name if login_role else None,
+                     "role_level": login_role.level if login_role else None,
                      "is_superadmin": user.is_superadmin, "organization_id": user.organization_id,
-                     "organization_name": org_name, "branch_id": user.branch_id},
+                     "organization_name": org_name, "organization_code": org_code, "organization_logo_url": org_logo,
+                     "branch_id": user.branch_id},
             "roles": [r["code"] for r in tree["roles"]],
             "permissions": permissions,
             "access": tree["access"],

@@ -17,6 +17,7 @@ class PaymentCreate(FormSchema):
     pt_subscription_id: UUID | None = None
     discount_amount: float | None = Field(default=None, ge=0)   # None → discounts stored on the subscriptions
     discount_reason: str | None = Field(default=None, max_length=200)
+    offer_id: UUID | None = None      # offer from the master → its % of the total (overrides discount_amount)
     paid_amount: float = Field(ge=0)
     payment_mode: PaymentMode
     balance_due_date: date | None = None
@@ -64,6 +65,11 @@ class PaymentStats(TessBaseSchema):
     last_6_months: float
     last_12_months: float
     total: float
+    # Money paid back on cancelled memberships (collections above are before refunds).
+    refunds_today: float = 0
+    refunds_this_month: float = 0
+    refunds_last_month: float = 0
+    refunds_total: float = 0
 
 
 class InvoiceMember(TessBaseSchema):
@@ -94,6 +100,19 @@ class InvoiceResponse(TessBaseSchema):
     branch_location: str | None = None
     member: InvoiceMember
     lines: list[InvoiceLine]
+    # Upgrade bill: what the previous plan cost, taken off the new plan (lines total − credit = gross).
+    credit_amount: float = 0
+    credit_label: str | None = None           # e.g. "Credit from 1 Month (REC-0091)"
+    offer_bonus: str | None = None            # "Diwali: +1 month, Free Protein shaker"
+    gym_code: str | None = None               # Gym ID
+    # Letterhead from Gym Settings (branch contacts / GSTIN override the gym's)
+    tagline: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    gstin: str | None = None
+    invoice_footer: str | None = None
+    logo_url: str | None = None
+    terms_url: str | None = None
     gross: float
     discount_amount: float
     discount_reason: str | None = None
@@ -101,3 +120,5 @@ class InvoiceResponse(TessBaseSchema):
     paid_amount: float
     balance_amount: float
     balance_due_date: date | None = None
+    # Signed id for the no-login link sent to the member (/i/<token> → GET /api/v1/public/invoice/<token>).
+    share_token: str

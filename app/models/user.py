@@ -33,6 +33,10 @@ class User(BaseModel):
         Boolean, nullable=False, default=False, server_default=text("false"),
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Staff login: the employee this account belongs to (set from the staff screen). NULL for owner accounts.
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("staff_employees.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
 
 
 class UserSession(BaseModel):

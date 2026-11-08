@@ -15,6 +15,15 @@ CATALOG: list[tuple] = [
             ("branch:update", "Update branch"), ("branch:delete", "Delete branch"),
             ("branch:switch", "Switch between branches"),
         ]),
+        ("roles", "Roles & Access", "/roles", 20, [
+            ("role:list", "View roles & access"), ("role:manage", "Create roles and set what they can do"),
+        ]),
+        ("gym_settings", "Gym Settings", "/gym-settings", 25, [
+            ("gym:manage", "Change the gym profile: name, logo, contacts, GSTIN, terms & conditions"),
+        ]),
+        ("settings", "Configuration", "/configuration", 30, [
+            ("setting:manage", "Change configuration (trial class, freeze / refund rules, renewal days, late grace)"),
+        ]),
     ]),
     ("members", "Members", "users", 30, [
         ("members", "Members", "/members", 10, [
@@ -25,14 +34,22 @@ CATALOG: list[tuple] = [
             ("lead:list", "List leads"), ("lead:create", "Create lead"), ("lead:update", "Update lead"),
             ("lead:delete", "Delete lead"), ("lead:convert", "Convert lead to member"),
         ]),
+        ("referrals", "Referrals", "/referrals", 25, [
+            ("referral:list", "View referrals, rewards and referral trees"),
+            ("referral:manage", "Set the monthly referral reward and give rewards"),
+        ]),
         ("subscriptions", "Subscriptions", "/subscriptions", 30, [
             ("subscription:list", "List subscriptions"), ("subscription:create", "Create / renew subscription"),
+            ("membership:manage", "Freeze, transfer, cancel & refund memberships"),
         ]),
     ]),
     ("plans", "Plans", "calendar", 40, [
         ("plans", "Plans", "/plans", 10, [
             ("plan:list", "List plans"), ("plan:create", "Create plan"),
             ("plan:update", "Update plan"), ("plan:delete", "Delete plan"),
+        ]),
+        ("offers", "Offers", "/offers", 20, [
+            ("offer:list", "View offers"), ("offer:manage", "Create / edit / switch offers on or off"),
         ]),
     ]),
     ("finance", "Accounts & Finance", "indian-rupee", 50, [
@@ -58,6 +75,7 @@ CATALOG: list[tuple] = [
             ("employee:list", "List staff"), ("employee:create", "Add staff"),
             ("employee:update", "Update staff"), ("employee:terminate", "Terminate staff"),
             ("feedback:create", "Add client feedback"), ("pii:view", "View Aadhaar / PAN / bank numbers"),
+            ("employee:login", "Give staff app logins, reset their passwords"),
         ]),
         ("attendance", "Attendance", "/attendance", 20, [
             ("attendance:list", "View attendance"), ("attendance:mark", "Mark attendance / checkout"),
@@ -75,21 +93,54 @@ CATALOG: list[tuple] = [
 
 ALL_PERMISSIONS = [p for _, _, _, _, screens in CATALOG for *_, perms in screens for p, _ in perms]
 
-# Default role grants. OWNER/ADMIN get everything; TRAINER mirrors what the original app let trainers do
-# (no dashboard, branch management, accounts, payroll, diet, PII).
-ROLES: dict[str, tuple[str, str, list[str]]] = {
-    "OWNER": ("Owner", "Gym owner — full access to every branch", ALL_PERMISSIONS),
-    "ADMIN": ("Admin", "Branch administrator — full access", ALL_PERMISSIONS),
-    "TRAINER": ("Trainer", "Floor trainer — fixed to one branch", [
-        "auth:me",
-        "member:list", "member:create", "member:update", "member:delete",
-        "lead:list", "lead:create", "lead:update", "lead:delete", "lead:convert",
-        "subscription:list", "subscription:create",
-        "plan:list", "plan:create", "plan:update", "plan:delete",
-        "payment:create", "payment:invoice",
-        "pt:list", "pt:create", "pt:update", "pt:log",
-        "employee:list", "employee:create", "employee:update", "employee:terminate", "feedback:create",
-        "attendance:list", "attendance:mark",
-        "food:list",
-    ]),
+# ── Role hierarchy ──────────────────────────────────────────────────────────────────────────────────────
+# Every gym (organization) gets its own copy of these roles. `level` orders them: a user may only create, edit
+# or hand out roles below their own level. Owner > Sub-admin (all branches) > Manager > Staff (one branch).
+OWNER_LEVEL, SUB_ADMIN_LEVEL, MANAGER_LEVEL, STAFF_LEVEL = 100, 80, 50, 10
+# Roles at this level or above see every branch ("All Branches"); below it a login is fixed to its branch.
+ALL_BRANCHES_LEVEL = SUB_ADMIN_LEVEL
+
+# Control of the gym itself stays with the owner: never grantable to another role.
+OWNER_ONLY = {"role:list", "role:manage", "branch:create", "branch:delete"}
+# Only all-branch roles may switch branches.
+ALL_BRANCHES_ONLY = {"branch:switch"}
+
+_STAFF = [
+    "auth:me",
+    "member:list", "member:create", "member:update",
+    "lead:list", "lead:create", "lead:update", "lead:convert",
+    "referral:list",
+    "subscription:list", "subscription:create",
+    "plan:list", "offer:list",
+    "payment:create", "payment:invoice",
+    "pt:list", "pt:log",
+    "diet:list", "food:list",
+    "feedback:create",
+    "attendance:list", "attendance:mark",
+]
+# A manager runs one branch: staff work + its sales & finance, staff and attendance (no payroll, PII, pricing).
+_MANAGER = _STAFF + [
+    "dashboard:view",
+    "member:delete", "lead:delete",
+    "payment:list", "payment:stats",
+    "pt:create", "pt:update",
+    "membership:manage", "referral:manage",
+    "diet:manage", "food:manage",
+    "employee:list", "employee:create", "employee:update", "employee:terminate", "employee:login",
+    "attendance:qr",
+]
+
+# code: (name, description, level, default grants) — grants are seeded only when a gym's role is first created.
+ROLES: dict[str, tuple[str, str, int, list[str]]] = {
+    "OWNER": ("Owner", "Super admin: the whole gym, every branch. Always has full access", OWNER_LEVEL,
+              ALL_PERMISSIONS),
+    "SUB_ADMIN": ("Sub-admin", "Owner's helper: every branch and screen, but not roles & access or adding / removing "
+                  "branches", SUB_ADMIN_LEVEL, [p for p in ALL_PERMISSIONS if p not in OWNER_ONLY]),
+    "MANAGER": ("Manager", "Runs one branch: members, leads, staff, sales & finance of that branch", MANAGER_LEVEL,
+                _MANAGER),
+    "STAFF": ("Staff", "Front desk / trainer of one branch: members and leads, collects payments", STAFF_LEVEL,
+              _STAFF),
 }
+OWNER_ROLE = "OWNER"
+# Old fixed login kinds → the role a gym's existing logins move to.
+LEGACY_ROLE_MAP = {"OWNER": "OWNER", "ADMIN": "MANAGER", "TRAINER": "STAFF"}

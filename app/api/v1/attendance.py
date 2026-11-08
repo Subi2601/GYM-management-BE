@@ -13,7 +13,8 @@ from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
 from app.schemas.attendance import (AttendanceLocationUpdate, AttendanceMark, AttendanceQrResponse,
                                     AttendanceResponse, CheckResult, DailyAttendanceResponse, LinkedDeviceResponse,
-                                    MemberCheckIn, MemberDailyResponse, MonthlyAttendanceResponse, SessionCheckout)
+                                    MemberCheckIn, MemberDailyResponse, MonthlyAttendanceResponse, SessionCheckout,
+                                    VisitingMember)
 
 router = APIRouter(prefix="/api/v1/attendance", tags=["attendance"])
 
@@ -51,6 +52,14 @@ async def mark_attendance(body: AttendanceMark, scope: BranchScope = Depends(get
 async def members_daily(date: date | None = Query(default=None), scope: BranchScope = Depends(get_branch_scope),
                         controller: AttendanceController = Depends()):
     return await controller.members_daily(scope, date)
+
+
+@router.get("/members/visitors", response_model=ResponseEnvelope[list[VisitingMember]],
+            dependencies=[Depends(require_permission("attendance:mark"))])
+async def visiting_members(scope: BranchScope = Depends(get_branch_scope),
+                           controller: AttendanceController = Depends()):
+    """Members of other branches on an all-branches plan — they may check in here too."""
+    return await controller.visitors(scope)
 
 
 @router.post("/members/check-in", response_model=ResponseEnvelope[CheckResult],

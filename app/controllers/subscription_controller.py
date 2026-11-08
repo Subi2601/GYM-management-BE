@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.scope import BranchScope
 from app.dependencies import get_db
 from app.schemas.subscription import (EnrollRequest, EnrollResponse, SubscriptionCounts, SubscriptionCreate,
-                                      SubscriptionDetail, SubscriptionResponse)
+                                      SubscriptionDetail, SubscriptionResponse, UpgradeInfo, UpgradeRequest)
 from app.services.subscription_service import SubscriptionService
 
 
@@ -44,6 +44,14 @@ class SubscriptionController:
                      ctx: RequestContext) -> ResponseEnvelope[EnrollResponse]:
         data = await self._service.enroll(body, scope, ctx)
         return ResponseEnvelope.ok(EnrollResponse(**data), message="Enrolment completed")
+
+    async def upgrade_options(self, member_id: UUID, scope: BranchScope) -> ResponseEnvelope[UpgradeInfo]:
+        return ResponseEnvelope.ok(UpgradeInfo(**await self._service.upgrade_options(member_id, scope)))
+
+    async def upgrade(self, body: UpgradeRequest, scope: BranchScope,
+                      ctx: RequestContext) -> ResponseEnvelope[EnrollResponse]:
+        data = await self._service.upgrade(body, scope, ctx)
+        return ResponseEnvelope.ok(EnrollResponse(**data), message="Plan upgraded")
 
     async def create_subscription(self, body: SubscriptionCreate, scope: BranchScope,
                                   ctx: RequestContext) -> ResponseEnvelope[SubscriptionDetail]:

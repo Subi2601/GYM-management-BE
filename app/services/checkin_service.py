@@ -17,6 +17,7 @@ from iam_core import RequestContext
 from shared.exceptions.http_exceptions import BadRequestError, NotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import timeutil
 from app.core.enums import AttendancePersonType, AttendanceSource
 from app.core.ratelimit import SlidingWindowLimiter
 from app.core.scope import BranchScope
@@ -79,17 +80,23 @@ class CheckinService:
         return BranchScope(branch.organization_id, branch.id, (branch.id,))
 
     async def _linked_person(self, branch: Branch, device_token: str | None) -> tuple[AttendanceDevice, Person] | None:
-        """The person this phone is linked to in this branch (None = not linked here yet)."""
+        """The person this phone is linked to, if they may check in at this branch (None = verify first).
+        Staff: their own branch only. Members: their home branch, or any branch while on an all-branches plan —
+        one phone link works everywhere they are allowed."""
         if not device_token:
             return None
         device = await self._repo.device_by_hash(_hash(device_token))
-        if device is None or device.branch_id != branch.id:
+        if device is None or device.organization_id != branch.organization_id:
             return None
         scope = self._scope(branch)
         if device.person_type == AttendancePersonType.STAFF:
+            if device.branch_id != branch.id:
+                return None
             employee = await self._repo.get_employee(device.employee_id, scope)  # type: ignore[arg-type]
             return (device, Person.staff(employee)) if employee else None
         member = await self._repo.get_member(device.member_id, scope)  # type: ignore[arg-type]
+        if member is None:
+            member = await self._repo.visitor(branch.organization_id, device.member_id, timeutil.today())
         return (device, Person.of_member(member)) if member else None
 
     async def info(self, token: str, device_token: str | None) -> dict:
@@ -115,6 +122,8 @@ class CheckinService:
         typed = _id_number(body.id_number)
         employee = await self._repo.staff_by_phone(branch.id, phone)
         member = await self._repo.member_by_phone(branch.id, phone)
+        if member is None:   # visiting from another branch on an all-branches plan
+            member = await self._repo.visitor_by_phone(branch.organization_id, phone, timeutil.today())
         # The same number can belong to a staff member and a member — the ID number decides.
         person: Person | None = None
         if employee is not None and typed is not None and _id_number(employee.employee_code) == typed:
@@ -131,7 +140,7 @@ class CheckinService:
         if current is not None and current[1].id != person.id:
             raise BadRequestError("This phone is already linked to another person. Ask the front desk to unlink it")
         # One person = one phone: linking this phone retires any other phone of theirs.
-        for old in await self._repo.devices_of(person.type, person.id):
+        for old in await self._repo.devices_of(person.type, person.id, None):
             old.soft_delete()
         new_token = secrets.token_urlsafe(32)
         await self._repo.add(AttendanceDevice(

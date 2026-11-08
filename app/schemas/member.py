@@ -28,6 +28,7 @@ class MemberCreate(FormSchema):
     id_proof_type: str | None = Field(default=None, max_length=40)
     id_proof_number: str | None = Field(default=None, max_length=40)
     status: MemberStatus = MemberStatus.ACTIVE
+    referred_by_id: UUID | None = None        # the member who referred them
 
 
 class MemberUpdate(FormSchema):
@@ -47,6 +48,7 @@ class MemberUpdate(FormSchema):
     id_proof_type: str | None = Field(default=None, max_length=40)
     id_proof_number: str | None = Field(default=None, max_length=40)
     status: MemberStatus | None = None
+    referred_by_id: UUID | None = None        # send null to clear
 
 
 class MemberResponse(UUIDSchema, TimestampMixin):
@@ -73,6 +75,11 @@ class MemberResponse(UUIDSchema, TimestampMixin):
     current_plan_id: UUID | None = None
     current_plan_name: str | None = None
     expiry_date: date | None = None
+    last_visit_date: date | None = None       # last check-in (None = never came)
+    days_since_visit: int | None = None
+    referred_by_id: UUID | None = None
+    referred_by_name: str | None = None
+    referral_count: int = 0                   # members this one referred (0 = no referral tree)
 
 
 class MemberCounts(TessBaseSchema):
@@ -80,4 +87,5 @@ class MemberCounts(TessBaseSchema):
     all: int
     active: int
     expiring: int
+    absent: int                               # running membership but no visit for the gym's alert days
     inactive: int

@@ -10,12 +10,15 @@ from iam_core import RequestContext
 from shared.exceptions.http_exceptions import BadRequestError, ConflictError, NotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import timeutil
+from app.core import share_token, timeutil
 from app.core.enums import PaymentMode
 from app.core.scope import BranchScope
 from app.models.billing import Payment
+from app.repositories.membership_repository import MembershipRepository
+from app.services.gym_profile_service import GymProfileService
 from app.repositories.payment_repository import PaymentRepository
 from app.repositories.subscription_repository import SubscriptionRepository
+from app.services.offer_service import OfferService
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
@@ -35,7 +38,9 @@ def allocate(total: Decimal, weights: list[Decimal]) -> list[Decimal]:
             parts[-1] = total
         return parts
     parts = [(total * w / base).quantize(CENT, rounding=ROUND_DOWN) for w in weights]
-    parts[-1] += total - sum(parts, ZERO)
+    # Rounding goes to the last line that carries weight (a zero-weight line — e.g. outside an offer — stays 0).
+    last = max(i for i, w in enumerate(weights) if w > ZERO)
+    parts[last] += total - sum(parts, ZERO)
     return parts
 
 
@@ -49,6 +54,7 @@ class PaymentService:
     def __init__(self, db: AsyncSession) -> None:
         self._repo = PaymentRepository(db)
         self._subs = SubscriptionRepository(db)
+        self._offers = OfferService(db)
 
     # ── output builder ───────────────────────────────────────────────────
     @staticmethod
@@ -114,9 +120,15 @@ class PaymentService:
             raise ConflictError("Subscription is already paid")
         subs.sort(key=lambda s: data.subscription_ids.index(s.id))
         plans = {p.id: p for p in await self._subs.get_plans([s.plan_id for s in subs], scope)}
-        prices = [plans[s.plan_id].price for s in subs]
+        prices = [s.price_share if s.price_share is not None else plans[s.plan_id].price for s in subs]
         gross = sum(prices, ZERO)
-        if data.discount_amount is None:            # use the discount captured on the subscriptions
+        weights = prices
+        applies = [False] * len(subs)
+        if data.offer_id:
+            discount, reason, applies = await self._offers.discount_for(
+                data.offer_id, [(plans[s.plan_id].category_id, price) for s, price in zip(subs, prices)], scope)
+            weights = [price if ok else ZERO for price, ok in zip(prices, applies)]
+        elif data.discount_amount is None:            # use the discount captured on the subscriptions
             discount = sum((s.discount_amount for s in subs), ZERO)
             reason = data.discount_reason or next((s.discount_reason for s in subs if s.discount_reason), None)
         else:
@@ -125,7 +137,7 @@ class PaymentService:
             scope=scope, branch_id=branch_id, member_id=subs[0].member_id, gross=gross, discount=discount,
             discount_reason=reason, paid=money(data.paid_amount), mode=data.payment_mode,
             balance_due_date=data.balance_due_date, payment_date=data.payment_date, actor=actor)
-        shares = allocate(discount, prices)
+        shares = allocate(discount, weights)
         for sub, share in zip(subs, shares):
             sub.payment_id = payment.id
             sub.discount_amount = share
@@ -134,6 +146,8 @@ class PaymentService:
         for pt in await self._subs.get_pt_for_subscriptions([s.id for s in subs]):
             pt.is_paid = True
             pt.updated_by = actor.user_id
+        payment.offer_bonus = await self._offers.apply_bonus(
+            data.offer_id, [(s, plans[s.plan_id], ok) for s, ok in zip(subs, applies)], scope)
         return payment
 
     async def _pay_pt(self, data, scope: BranchScope, branch_id: UUID, actor: RequestContext) -> Payment:
@@ -148,9 +162,13 @@ class PaymentService:
         plan = await self._repo.get_plan(pt.plan_id) if pt.plan_id else None
         if plan is None:
             raise BadRequestError("PT subscription has no plan to price it")
+        discount, reason = money(data.discount_amount), data.discount_reason
+        if data.offer_id:
+            discount, reason, _ = await self._offers.discount_for(data.offer_id, [(plan.category_id, plan.price)],
+                                                                  scope)
         payment = await self.build_payment(
             scope=scope, branch_id=branch_id, member_id=pt.member_id, gross=plan.price,
-            discount=money(data.discount_amount), discount_reason=data.discount_reason,
+            discount=discount, discount_reason=reason,
             paid=money(data.paid_amount), mode=data.payment_mode, balance_due_date=data.balance_due_date,
             payment_date=data.payment_date, actor=actor, pt_subscription_id=pt.id)
         pt.is_paid = True
@@ -189,7 +207,11 @@ class PaymentService:
             "last_12_months": (add_months(today, -12), None),
             "total": (None, None),
         }
-        return await self._repo.sum_paid(scope, windows, today)
+        out = await self._repo.sum_paid(scope, windows, today)
+        refunds = await MembershipRepository(self._repo._db).sum_refunds(
+            scope, {k: windows[k] for k in ("today", "this_month", "last_month", "total")})
+        out.update({f"refunds_{k}": v for k, v in refunds.items()})
+        return out
 
     async def invoice(self, payment_id: UUID, scope: BranchScope) -> dict:
         payment = await self._repo.get_payment(payment_id, scope)
@@ -198,6 +220,7 @@ class PaymentService:
         org, branch = await self._repo.get_org_branch(payment.organization_id, payment.branch_id)
         member = await self._repo.get_member(payment.member_id)
         lines: list[dict] = []
+        credit, credit_label = ZERO, None
         if payment.pt_subscription_id:
             pt = await self._repo.get_pt(payment.pt_subscription_id, scope)
             plan = await self._repo.get_plan(pt.plan_id) if pt and pt.plan_id else None
@@ -212,10 +235,24 @@ class PaymentService:
                 })
         else:
             for sub, plan in await self._subs.lines_for_payment(payment.id):
+                if sub.upgrade_credit is not None and sub.upgraded_from_id:
+                    credit = sub.upgrade_credit
+                    old = await self._subs.get_row(sub.upgraded_from_id, scope)
+                    old_payment = (await self._repo.get_payment(old[0].payment_id, scope)
+                                   if old and old[0].payment_id else None)
+                    credit_label = (f"Credit from {old[4].name if old else 'previous plan'}"
+                                    + (f" ({old_payment.receipt_no})" if old_payment else ""))
+                name = plan.name
+                if sub.price_share is not None:          # group package: one line per member, their share
+                    name = f"{plan.name} · {(await self._repo.get_member(sub.member_id)).name}"
                 lines.append({
-                    "plan_name": plan.name, "plan_type": plan.type, "service_type": plan.service_type,
-                    "duration_days": plan.duration_days, "total_sessions": plan.total_sessions,
-                    "start_date": sub.start_date, "end_date": sub.end_date, "price": plan.price,
+                    "plan_name": name, "plan_type": plan.type, "service_type": plan.service_type,
+                    # Real days covered: calendar-month plans vary (3 months = 89-92 days).
+                    "duration_days": ((sub.end_date - sub.start_date).days
+                                      if sub.end_date and sub.start_date else plan.duration_days),
+                    "total_sessions": plan.total_sessions,
+                    "start_date": sub.start_date, "end_date": sub.end_date,
+                    "price": sub.price_share if sub.price_share is not None else plan.price,
                 })
         return {
             "payment_id": payment.id, "receipt_no": payment.receipt_no, "payment_date": payment.payment_date,
@@ -224,9 +261,26 @@ class PaymentService:
             "member": {"id": member.id, "registration_id": member.registration_id, "name": member.name,
                        "phone": member.phone},
             "lines": lines,
+            "credit_amount": credit, "credit_label": credit_label, "offer_bonus": payment.offer_bonus,
+            "gym_code": org.code,
+            # Letterhead (Gym Settings): the branch's own contacts / GSTIN when set, else the gym's.
+            "tagline": org.tagline, "phone": branch.phone or org.contact_phone,
+            "email": branch.email or org.contact_email, "gstin": branch.gstin or org.gstin,
+            "invoice_footer": org.invoice_footer, **{k: v for k, v in (await GymProfileService(
+                self._repo._db).links(org)).items() if k in ("logo_url", "terms_url")},
             "gross": payment.amount, "discount_amount": payment.discount_amount,
             "discount_reason": payment.discount_reason,
             "net_amount": payment.amount - payment.discount_amount,
             "paid_amount": payment.paid_amount, "balance_amount": payment.balance_amount,
             "balance_due_date": payment.balance_due_date,
+            "share_token": share_token.sign("invoice", payment.id),
         }
+
+    async def public_invoice(self, token: str) -> dict:
+        """Invoice opened from a shared link (WhatsApp) — no login; the signed token is the permission."""
+        payment_id = share_token.verify("invoice", token)
+        payment = await self._repo.get_payment_unscoped(payment_id) if payment_id else None
+        if payment is None:
+            raise NotFoundError("Invoice")
+        return await self.invoice(payment.id, BranchScope(payment.organization_id, payment.branch_id,
+                                                          (payment.branch_id,)))

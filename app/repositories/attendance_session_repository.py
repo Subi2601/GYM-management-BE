@@ -4,11 +4,12 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 
-from app.core.enums import AttendancePersonType, EmployeeStatus
+from app.core.enums import MEMBERSHIP_PLAN_TYPES, AttendancePersonType, EmployeeStatus
 from app.core.scope import BranchScope
 from app.models.attendance import AttendanceDevice, AttendanceSession
+from app.models.billing import Plan, Subscription
 from app.models.member import Member
 from app.models.organization import Branch
 from app.models.staff import Employee
@@ -77,6 +78,34 @@ class AttendanceSessionRepository(BaseRepository):
     async def get_member(self, member_id: UUID, scope: BranchScope) -> Member | None:
         return await self.get_scoped(Member, member_id, scope)
 
+    # ── members visiting from another branch (plan valid at all branches) ──
+    def _visitors(self, organization_id: UUID, today: date):
+        """Members whose latest membership is on an all-branches plan and still running."""
+        rn = func.row_number().over(partition_by=Subscription.member_id,
+                                    order_by=(Subscription.start_date.desc(), Subscription.created_at.desc()))
+        latest = (select(Subscription.member_id, Subscription.end_date, Plan.all_branches, rn.label("rn"))
+                  .join(Plan, Plan.id == Subscription.plan_id)
+                  .where(Subscription.organization_id == organization_id, Subscription.is_delete.is_(False),
+                         Plan.type.in_(MEMBERSHIP_PLAN_TYPES))
+                  .subquery())
+        return (select(Member).join(latest, latest.c.member_id == Member.id)
+                .where(latest.c.rn == 1, latest.c.all_branches.is_(True), latest.c.end_date >= today,
+                       Member.organization_id == organization_id, Member.is_delete.is_(False)))
+
+    async def visitor(self, organization_id: UUID, member_id: UUID, today: date) -> Member | None:
+        stmt = self._visitors(organization_id, today).where(Member.id == member_id)
+        return (await self._db.execute(stmt)).scalar_one_or_none()
+
+    async def visitor_by_phone(self, organization_id: UUID, phone: str, today: date) -> Member | None:
+        stmt = self._visitors(organization_id, today).where(Member.phone == phone)
+        return (await self._db.execute(stmt.limit(1))).scalars().first()
+
+    async def visitors_for_branch(self, organization_id: UUID, branch_id: UUID, today: date) -> list:
+        """Rows (member, home branch name) who may check in here although they belong to another branch."""
+        stmt = (self._visitors(organization_id, today).add_columns(Branch.branch_name)
+                .join(Branch, Branch.id == Member.branch_id).where(Member.branch_id != branch_id))
+        return list((await self._db.execute(stmt.order_by(Member.name))).all())
+
     # ── QR branch + linked phones ────────────────────────────────────────
     async def branch_by_token(self, token: str) -> Branch | None:
         stmt = self.alive(Branch, select(Branch).where(Branch.checkin_token == token))
@@ -98,9 +127,13 @@ class AttendanceSessionRepository(BaseRepository):
         stmt = self.alive(AttendanceDevice, select(AttendanceDevice).where(AttendanceDevice.token_hash == token_hash))
         return (await self._db.execute(stmt)).scalar_one_or_none()
 
-    async def devices_of(self, person_type: AttendancePersonType, person_id: UUID) -> list[AttendanceDevice]:
+    async def devices_of(self, person_type: AttendancePersonType, person_id: UUID,
+                         branch_id: UUID | None = None) -> list[AttendanceDevice]:
+        """The person's linked phones (one link works at every branch they may use); `branch_id` narrows it."""
         stmt = self.alive(AttendanceDevice, select(AttendanceDevice).where(
             _person_filter(AttendanceDevice, person_type, person_id)))
+        if branch_id is not None:
+            stmt = stmt.where(AttendanceDevice.branch_id == branch_id)
         return list((await self._db.execute(stmt)).scalars().all())
 
     async def get_device(self, device_id: UUID, scope: BranchScope) -> AttendanceDevice | None:

@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.organization import Branch, Organization
 from app.repositories.organization_repository import OrganizationRepository
 from app.services.branch_service import BranchService
+from app.services.plan_category_service import PlanCategoryService
 
 
 class OrganizationService:
     def __init__(self, db: AsyncSession) -> None:
+        self._db = db
         self._repo = OrganizationRepository(db)
         self._branches = BranchService(db)
 
@@ -37,6 +39,7 @@ class OrganizationService:
         owner = await self._branches.create_owner_login(
             organization_id=org.id, branch_id=branch.id, name=data.owner_name, email=data.owner_email,
             password=data.owner_password, actor_id=ctx.user_id)
+        await PlanCategoryService(self._db).create_defaults(org.id, ctx.user_id)
         ids = (org.id, branch.id, owner.id, owner.email)   # read before commit expires them
         await self._repo.commit()
         org_id, branch_id, owner_id, owner_email = ids

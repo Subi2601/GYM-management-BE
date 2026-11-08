@@ -72,6 +72,15 @@ class MemberCheckIn(FormSchema):
     member_id: UUID
 
 
+class VisitingMember(TessBaseSchema):
+    """A member of another branch whose plan is valid at all branches (manual check-in list)."""
+    id: UUID
+    name: str
+    registration_id: str
+    phone: str
+    home_branch: str
+
+
 class SessionCheckout(FormSchema):
     """Front desk closes a visit. Omit the time for now (today only); a past day needs it."""
     check_out_time: dt.time | None = None
@@ -111,6 +120,7 @@ class CheckResult(TessBaseSchema):
     name: str
     time: dt.time
     late: bool = False
+    half_day: bool = False                    # came so late the day counts as a half day (Gym settings)
     duration_minutes: int | None = None
 
 

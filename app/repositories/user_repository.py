@@ -41,6 +41,15 @@ class UserRepository(BaseRepository):
         self._db.add(link)
         await self._db.flush()
 
+    async def user_roles(self, user_id: UUID) -> list[UserRole]:
+        stmt = select(UserRole).where(UserRole.user_id == user_id, UserRole.deleted_at.is_(None))
+        return list((await self._db.execute(stmt)).scalars().all())
+
+    async def get_employee_login(self, employee_id: UUID) -> User | None:
+        """The staff member's account — disabled ones included (is_active=False), so it can be re-enabled."""
+        stmt = self.alive(User, select(User).where(User.employee_id == employee_id))
+        return (await self._db.execute(stmt)).scalars().first()
+
     # ── sessions ─────────────────────────────────────────────────────────
     async def get_session(self, session_id: UUID) -> UserSession | None:
         stmt = select(UserSession).where(UserSession.id == session_id)

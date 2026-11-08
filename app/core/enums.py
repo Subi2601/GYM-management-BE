@@ -38,6 +38,16 @@ class LeadStatus(str, enum.Enum):
     JOINED_ELSEWHERE = "JOINED_ELSEWHERE"
 
 
+class LeadSource(str, enum.Enum):
+    """How the enquiry reached the gym. Stored as VARCHAR (non-native enum) so channels can be added freely."""
+    WALK_IN = "WALK_IN"              # visited the gym
+    PHONE_CALL = "PHONE_CALL"        # called the gym
+    ENQUIRY_FORM = "ENQUIRY_FORM"    # filled an enquiry / promotion form
+    REFERRAL = "REFERRAL"            # referred by a member or friend
+    SOCIAL_MEDIA = "SOCIAL_MEDIA"    # Instagram, Facebook, WhatsApp, Google
+    OTHER = "OTHER"
+
+
 class FitnessGoal(str, enum.Enum):
     """Primary goal of a lead / member, as a coach groups clients for programming and follow-ups.
     Stored as VARCHAR (non-native enum), so options can be added without a DB type change."""
@@ -82,6 +92,27 @@ class PlanServiceType(str, enum.Enum):
 class SubscriptionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     EXPIRED = "EXPIRED"
+
+
+class MembershipClose(str, enum.Enum):
+    """Why a membership ended before its time (stored as VARCHAR on the subscription; NULL = ran normally)."""
+    CANCELLED = "CANCELLED"        # cancelled by the gym (with or without a refund)
+    TRANSFERRED = "TRANSFERRED"    # handed over to another person
+
+
+class DocumentKind(str, enum.Enum):
+    """What a member document supports (proof for a freeze, transfer or cancellation)."""
+    FREEZE = "FREEZE"
+    TRANSFER = "TRANSFER"
+    CANCEL = "CANCEL"
+
+
+class Lifestyle(str, enum.Enum):
+    """Day-to-day activity on the client assessment."""
+    SEDENTARY = "SEDENTARY"            # desk job, little walking
+    LIGHTLY_ACTIVE = "LIGHTLY_ACTIVE"
+    ACTIVE = "ACTIVE"
+    VERY_ACTIVE = "VERY_ACTIVE"        # physical job / sport
 
 
 class RenewalState(str, enum.Enum):

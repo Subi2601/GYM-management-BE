@@ -77,8 +77,13 @@ def main() -> None:
     me = check("me", owner.get("/api/v1/auth/me"))["data"]
     north = next(b for b in me["branches"] if b["branch_name"] == "North Branch")
     owner.headers["X-Branch-ID"] = north["id"]
+    # A branch Manager login (staff access, no PII / payroll) — the "trainer" of these checks.
+    mgr_email = f"manager{_seq}@example.com"
+    mgr = check("create manager employee", owner.post("/api/v1/employees", json=employee_body(
+        name="Smoke Manager", role="MANAGER", email=mgr_email)), 201)["data"]
+    check("manager login", owner.put(f"/api/v1/employees/{mgr['id']}/login", json={"password": "Manager@123"}))
     trainer = httpx.Client(base_url=BASE, timeout=30)
-    login(trainer, "trainer@gym.com", "trainer123")
+    login(trainer, mgr_email, "Manager@123")
     today = date.today().isoformat()
 
     # ── employees: create + code sequence + PII ──────────────────────────
@@ -250,8 +255,10 @@ def main() -> None:
     one = check("calculate single e1 02-2025", owner.post("/api/v1/salary/calculate", json={
         "month": 2, "year": 2025, "employee_id": e1["id"]}))["data"]
     s1 = one["results"][0]["salary"]
-    expect("e1 numbers (28000/28 → 2 absent)", s1["deductions"] == 2000.0 and s1["till_now_salary"] == 3000.0
-           and s1["net_salary"] == 26000.0 and s1["days_present"] == 3 and s1["days_absent"] == 2
+    # 28000 / 28 = 1000 a day: 2 absent + 1 half day (half pay) → 2500 cut; earned 3 present + ½ = 3500.
+    expect("e1 numbers (28000/28 → 2 absent + 1 half day)", s1["deductions"] == 2500.0
+           and s1["till_now_salary"] == 3500.0
+           and s1["net_salary"] == 25500.0 and s1["days_present"] == 3 and s1["days_absent"] == 2
            and s1["days_late"] == 1 and s1["status"] == "PENDING" and s1["month_year"] == "02-2025", s1)
     expect("e1 absent dates", s1["absent_dates"] == ["2025-02-05", "2025-02-06"], s1["absent_dates"])
     bulk = check("calculate bulk 02-2025", owner.post("/api/v1/salary/calculate", json={"month": 2, "year": 2025}))
@@ -305,7 +312,7 @@ def main() -> None:
            e4["employee_code"])
 
     # cleanup — keep later runs' bulk payroll small
-    for emp in (e1, e3, e4):
+    for emp in (e1, e3, e4, mgr):
         check(f"cleanup terminate {emp['employee_code']}", owner.patch(f"/api/v1/employees/{emp['id']}/terminate"))
 
     print("\nFAILURES:", failures)

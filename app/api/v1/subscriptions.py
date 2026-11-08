@@ -14,7 +14,7 @@ from app.core.scope import BranchScope
 from app.dependencies import get_branch_scope, get_current_user
 from app.schemas.common import SortDir
 from app.schemas.subscription import (EnrollRequest, EnrollResponse, SubscriptionCounts, SubscriptionCreate,
-                                      SubscriptionDetail, SubscriptionResponse)
+                                      SubscriptionDetail, SubscriptionResponse, UpgradeInfo, UpgradeRequest)
 
 router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
 
@@ -48,6 +48,21 @@ async def subscription_counts(scope: BranchScope = Depends(get_branch_scope),
 async def enroll(body: EnrollRequest, scope: BranchScope = Depends(get_branch_scope),
                  ctx: RequestContext = Depends(get_current_user), controller: SubscriptionController = Depends()):
     return await controller.enroll(body, scope, ctx)
+
+
+@router.post("/upgrade", response_model=ResponseEnvelope[EnrollResponse], status_code=201,
+             dependencies=[Depends(require_permission("subscription:create"))])
+async def upgrade(body: UpgradeRequest, scope: BranchScope = Depends(get_branch_scope),
+                  ctx: RequestContext = Depends(get_current_user), controller: SubscriptionController = Depends()):
+    """Upgrade the current membership inside its window: credit the old plan, bill only the balance."""
+    return await controller.upgrade(body, scope, ctx)
+
+
+@router.get("/member/{member_id}/upgrade", response_model=ResponseEnvelope[UpgradeInfo],
+            dependencies=[Depends(require_permission("subscription:list"))])
+async def upgrade_options(member_id: UUID, scope: BranchScope = Depends(get_branch_scope),
+                          controller: SubscriptionController = Depends()):
+    return await controller.upgrade_options(member_id, scope)
 
 
 @router.get("/member/{member_id}", response_model=ResponseEnvelope[list[SubscriptionResponse]],

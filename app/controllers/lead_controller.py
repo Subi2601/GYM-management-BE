@@ -10,10 +10,11 @@ from shared.schemas.base_schema import PaginatedEnvelope, ResponseEnvelope
 from shared.utils.pagination import PaginationParams
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import LeadStatus
+from app.core.enums import LeadSource, LeadStatus
 from app.core.scope import BranchScope
 from app.dependencies import get_db
-from app.schemas.lead import LeadConvertResponse, LeadCounts, LeadCreate, LeadFollowUp, LeadResponse, LeadUpdate
+from app.schemas.lead import (LeadAttendant, LeadConvertResponse, LeadCounts, LeadCreate, LeadFollowUp, LeadResponse,
+                              LeadTrialPaid, LeadTrialStart, LeadUpdate)
 from app.services.lead_service import LeadService
 
 
@@ -22,11 +23,12 @@ class LeadController:
         self._service = LeadService(db)
 
     async def list_leads(self, scope: BranchScope, pagination: PaginationParams, search: str | None,
-                         lead_filter: str | None, status: LeadStatus | None, follow_up_from: date | None,
-                         follow_up_to: date | None, sort_by: str | None,
-                         sort_dir: str) -> PaginatedEnvelope[LeadResponse]:
+                         lead_filter: str | None, status: LeadStatus | None, source: LeadSource | None,
+                         attended_by: UUID | None, follow_up_from: date | None, follow_up_to: date | None,
+                         sort_by: str | None, sort_dir: str) -> PaginatedEnvelope[LeadResponse]:
         rows, total = await self._service.list_leads(scope, offset=pagination.offset, limit=pagination.limit,
                                                      search=search, lead_filter=lead_filter, status=status,
+                                                     source=source, attended_by=attended_by,
                                                      follow_up_from=follow_up_from, follow_up_to=follow_up_to,
                                                      sort_by=sort_by, sort_dir=sort_dir)
         return PaginatedEnvelope.ok([LeadResponse(**r) for r in rows], total,
@@ -34,6 +36,9 @@ class LeadController:
 
     async def counts(self, scope: BranchScope) -> ResponseEnvelope[LeadCounts]:
         return ResponseEnvelope.ok(LeadCounts(**await self._service.tab_counts(scope)))
+
+    async def attendants(self, scope: BranchScope) -> ResponseEnvelope[list[LeadAttendant]]:
+        return ResponseEnvelope.ok([LeadAttendant(**a) for a in await self._service.attendants(scope)])
 
     async def get_lead(self, lead_id: UUID, scope: BranchScope) -> ResponseEnvelope[LeadResponse]:
         return ResponseEnvelope.ok(LeadResponse(**await self._service.get_lead(lead_id, scope)))
@@ -56,6 +61,27 @@ class LeadController:
                             ctx: RequestContext) -> ResponseEnvelope[LeadResponse]:
         data = await self._service.add_follow_up(lead_id, body, scope, ctx)
         return ResponseEnvelope.ok(LeadResponse(**data), message="Follow-up recorded")
+
+    async def start_trial(self, lead_id: UUID, body: LeadTrialStart, scope: BranchScope,
+                          ctx: RequestContext) -> ResponseEnvelope[LeadResponse]:
+        data = await self._service.start_trial(lead_id, body, scope, ctx)
+        return ResponseEnvelope.ok(LeadResponse(**data), message=f"Trial booked for {data['name']}")
+
+    async def cancel_trial(self, lead_id: UUID, scope: BranchScope,
+                           ctx: RequestContext) -> ResponseEnvelope[LeadResponse]:
+        data = await self._service.cancel_trial(lead_id, scope, ctx)
+        return ResponseEnvelope.ok(LeadResponse(**data), message="Trial cancelled")
+
+    async def trial_visit(self, lead_id: UUID, scope: BranchScope,
+                          ctx: RequestContext) -> ResponseEnvelope[LeadResponse]:
+        data = await self._service.trial_visit(lead_id, scope, ctx)
+        return ResponseEnvelope.ok(LeadResponse(**data),
+                                   message=f"Trial visit {data['trial_visits']} marked for {data['name']}")
+
+    async def trial_paid(self, lead_id: UUID, body: LeadTrialPaid, scope: BranchScope,
+                         ctx: RequestContext) -> ResponseEnvelope[LeadResponse]:
+        data = await self._service.trial_paid(lead_id, body, scope, ctx)
+        return ResponseEnvelope.ok(LeadResponse(**data), message="Trial fee recorded")
 
     async def convert(self, lead_id: UUID, scope: BranchScope,
                       ctx: RequestContext) -> ResponseEnvelope[LeadConvertResponse]:

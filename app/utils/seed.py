@@ -16,11 +16,13 @@ from app.config import settings
 from app.core.enums import AccountRole, FoodCategory, PlanServiceType, PlanType
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
-from app.models.billing import Plan
+from app.models.billing import Plan, PlanCategory
 from app.models.diet import FoodItem
 from app.models.organization import Branch, Organization
 from app.models.user import User
-from app.utils.rbac_catalog import CATALOG, ROLES
+from app.services.plan_category_service import DEFAULT_CATEGORIES
+from app.services.role_service import RoleService
+from app.utils.rbac_catalog import CATALOG, LEGACY_ROLE_MAP
 
 _log = logging.getLogger("seed")
 
@@ -80,19 +82,28 @@ async def seed_rbac(db: AsyncSession) -> None:
                     await db.flush()
                 perm_ids[p_code] = perm.id
                 screen_of[p_code] = screen.id
+    await db.flush()
 
-    for r_code, (r_name, r_desc, grants) in ROLES.items():
-        role = await _first(db, select(RBACRole).where(RBACRole.code == r_code))
-        if role is None:
-            role = RBACRole(code=r_code, name=r_name, description=r_desc, is_system=True)
-            db.add(role)
-            await db.flush()
-        existing = {rp.permission_id for rp in (await db.execute(
-            select(RBACRolePermission).where(RBACRolePermission.role_id == role.id))).scalars()}
-        for code in grants:
-            if perm_ids[code] not in existing:
-                db.add(RBACRolePermission(role_id=role.id, screen_id=screen_of[code],
-                                          permission_id=perm_ids[code], is_granted=True))
+
+async def seed_org_roles(db: AsyncSession) -> None:
+    """Every gym gets its own Owner / Sub-admin / Manager / Staff roles (access is then the owner's to change);
+    logins still on the old shared OWNER / ADMIN / TRAINER roles move onto them and the shared rows retire."""
+    roles = RoleService(db)
+    for org in (await db.execute(select(Organization).where(Organization.deleted_at.is_(None)))).scalars().all():
+        org_roles = await roles.ensure_org_roles(org.id)
+        moved = await roles.move_legacy_logins(org.id, org_roles)
+        if moved:
+            _log.info("%s: moved %d login(s) to the gym's own roles", org.name, moved)
+    for legacy in (await db.execute(select(RBACRole).where(RBACRole.organization_id.is_(None),
+                                                           RBACRole.deleted_at.is_(None)))).scalars().all():
+        for link in (await db.execute(select(UserRole).where(UserRole.role_id == legacy.id,
+                                                             UserRole.deleted_at.is_(None)))).scalars():
+            link.soft_delete()                 # only the platform superadmin is left here; it bypasses RBAC
+        for grant in (await db.execute(select(RBACRolePermission).where(
+                RBACRolePermission.role_id == legacy.id, RBACRolePermission.deleted_at.is_(None)))).scalars():
+            grant.soft_delete()
+        legacy.soft_delete()
+        _log.info("retired shared role %s", legacy.code)
     await db.flush()
 
 
@@ -106,9 +117,10 @@ async def _ensure_user(db: AsyncSession, *, email: str, password: str, name: str
         db.add(user)
         await db.flush()
         _log.info("created login %s", email)
-    rbac_role = await _first(db, select(RBACRole).where(RBACRole.code == role.value))
-    link = await _first(db, select(UserRole).where(UserRole.user_id == user.id, UserRole.role_id == rbac_role.id))
-    if link is None:
+    if org is None:                            # platform superadmin: no gym role, bypasses RBAC
+        return user
+    rbac_role = (await RoleService(db).ensure_org_roles(org.id))[LEGACY_ROLE_MAP[role.value]]
+    if await _first(db, select(UserRole).where(UserRole.user_id == user.id, UserRole.deleted_at.is_(None))) is None:
         db.add(UserRole(user_id=user.id, role_id=rbac_role.id, assigned_by=user.id))
     return user
 
@@ -136,12 +148,23 @@ async def seed_demo(db: AsyncSession) -> None:
     await _ensure_user(db, email=settings.SEED_SUPERADMIN_EMAIL, password=settings.SEED_SUPERADMIN_PASSWORD,
                        name="Platform Admin", role=AccountRole.OWNER, org=None, branch=None, superadmin=True)
 
+    if await _first(db, select(PlanCategory).where(PlanCategory.organization_id == org.id)) is None:
+        for i, cat_name in enumerate(DEFAULT_CATEGORIES, start=1):
+            db.add(PlanCategory(organization_id=org.id, name=cat_name, sort_order=i))
+        await db.flush()
+    categories = {c.name: c.id for c in (await db.execute(
+        select(PlanCategory).where(PlanCategory.organization_id == org.id))).scalars()}
+
     if await _first(db, select(Plan).where(Plan.organization_id == org.id)) is None:
         for branch in branches:
             for name, ptype, service, days, price, sessions in DEMO_PLANS:
+                category = ("Personal Training" if service == PlanServiceType.PERSONAL_TRAINING
+                            else "Diet" if service == PlanServiceType.DIET else "General")
                 db.add(Plan(organization_id=org.id, branch_id=branch.id, name=name, type=ptype,
                             service_type=service, duration_days=days, price=Decimal(price),
-                            total_sessions=sessions))
+                            total_sessions=sessions, category_id=categories[category],
+                            duration_months={30: 1, 90: 3, 365: 12}.get(days) if ptype == PlanType.MEMBERSHIP
+                            else None))
 
     if await _first(db, select(FoodItem).where(FoodItem.organization_id.is_(None))) is None:
         for name, cat, kcal, protein, carbs, fats, unit, benefits in FOODS:
@@ -153,6 +176,7 @@ async def main() -> None:
     async with AsyncSessionLocal() as db:
         await seed_rbac(db)
         await seed_demo(db)
+        await seed_org_roles(db)
         await db.commit()
     _log.info("seed complete")
 

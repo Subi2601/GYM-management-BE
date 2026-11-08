@@ -21,17 +21,21 @@ class PlanController:
         self._service = PlanService(db)
 
     async def list_plans(self, scope: BranchScope, pagination: PaginationParams, search: str | None,
-                         plan_type: PlanType | None,
-                         service_type: PlanServiceType | None, sort_by: str | None,
-                         sort_dir: str) -> PaginatedEnvelope[PlanResponse]:
+                         plan_type: PlanType | None, service_type: PlanServiceType | None, category_id: UUID | None,
+                         active_only: bool, sort_by: str | None, sort_dir: str,
+                         status: str | None = None) -> PaginatedEnvelope[PlanResponse]:
         rows, total = await self._service.list_plans(scope, offset=pagination.offset, limit=pagination.limit,
                                                      search=search, plan_type=plan_type,
-                                                     service_type=service_type, sort_by=sort_by, sort_dir=sort_dir)
+                                                     service_type=service_type, category_id=category_id,
+                                                     active_only=active_only, status=status, sort_by=sort_by,
+                                                     sort_dir=sort_dir)
         return PaginatedEnvelope.ok([PlanResponse(**r) for r in rows], total,
                                    pagination.page, pagination.page_size)
 
-    async def counts(self, scope: BranchScope) -> ResponseEnvelope[PlanCounts]:
-        return ResponseEnvelope.ok(PlanCounts(**await self._service.tab_counts(scope)))
+    async def counts(self, scope: BranchScope, search: str | None = None,
+                     category_id: UUID | None = None) -> ResponseEnvelope[PlanCounts]:
+        data = await self._service.tab_counts(scope, search=search, category_id=category_id)
+        return ResponseEnvelope.ok(PlanCounts(**data))
 
     async def get_plan(self, plan_id: UUID, scope: BranchScope) -> ResponseEnvelope[PlanResponse]:
         return ResponseEnvelope.ok(PlanResponse(**await self._service.get_plan(plan_id, scope)))

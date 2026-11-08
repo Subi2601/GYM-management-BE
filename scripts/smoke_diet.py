@@ -231,8 +231,8 @@ def main() -> None:
     check("trainer can list foods", trainer.get("/api/v1/food-items"))
     check("trainer cannot create food", trainer.post("/api/v1/food-items", json={
         "name": f"{TAG} T", "category": "VEG", "calories": 1}), 403)
-    check("trainer eligible-members -> 403", trainer.get("/api/v1/diet-plans/eligible-members"), 403)
-    check("trainer get plan -> 403", trainer.get(f"/api/v1/diet-plans/member/{std_m['id']}"), 403)
+    # Staff (trainer@gym.com) may view diet plans of their own branch, but not build them.
+    check("trainer eligible-members (view)", trainer.get("/api/v1/diet-plans/eligible-members"))
     check("trainer configure -> 403", trainer.put(f"/api/v1/diet-plans/member/{std_m['id']}",
                                                   json={**calc, "tier": "STANDARD"}), 403)
     check("trainer add item -> 403", trainer.post(url, json={"food_item_id": chicken["id"], "meal_time": "Lunch"}),

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import ColumnElement, and_, func, or_, select
 
+from app.core.enums import PlanType
 from app.core.scope import BranchScope
 from app.models.billing import Plan, Subscription
 from app.models.member import Member
@@ -108,6 +109,16 @@ class SubscriptionRepository(BaseRepository):
                            .where(Subscription.payment_id == payment_id))
                 .order_by(Subscription.created_at, Plan.name))
         return [tuple(r) for r in (await self._db.execute(stmt)).all()]
+
+    async def current_membership(self, member_id: UUID, scope: BranchScope) -> tuple[Subscription, Plan] | None:
+        """The member's latest membership-type subscription that hasn't been upgraded (same order as the board)."""
+        stmt = (self.scoped(Subscription, select(Subscription, Plan).join(Plan, Plan.id == Subscription.plan_id),
+                            scope)
+                .where(Subscription.member_id == member_id, Plan.type == PlanType.MEMBERSHIP,
+                       Subscription.upgraded_to_id.is_(None), Subscription.closed_reason.is_(None))
+                .order_by(Subscription.start_date.desc(), Subscription.created_at.desc()).limit(1))
+        row = (await self._db.execute(stmt)).first()
+        return (row[0], row[1]) if row else None
 
     async def pt_id_for_subscription(self, subscription_id: UUID) -> UUID | None:
         stmt = self.alive(PTSubscription, select(PTSubscription.id)

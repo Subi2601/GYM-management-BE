@@ -203,13 +203,17 @@ def _organization_checks(owner: httpx.Client, sa: httpx.Client) -> None:
 def plan_checks(owner: httpx.Client, trainer: httpx.Client, me: dict) -> None:
     print("\n── plans ──")
     main_branch = next(b for b in me["branches"] if b["branch_name"] == "Main Branch")
+    cats = {c["name"]: c["id"] for c in check("plan categories", owner.get("/api/v1/plan-categories"))["data"]}
     base = {"name": f"Smoke Monthly {RUN}", "type": "MEMBERSHIP", "service_type": "GENERAL",
-            "duration_days": 30, "price": 1499.5, "description": "smoke"}
+            "duration_days": 30, "price": 1499.5, "description": "smoke", "category_id": cats["General"]}
     plan = check("create membership plan", owner.post("/api/v1/plans", json=base), 201).get("data") or {}
     expect("price is float", plan.get("price") == 1499.5, plan)
+    check("plan needs a category", owner.post("/api/v1/plans", json={k: v for k, v in base.items()
+                                                                       if k != "category_id"}), 422)
     pt = check("create PT plan", owner.post("/api/v1/plans", json={
         "name": f"Smoke PT {RUN}", "type": "ADD_ON", "service_type": "PERSONAL_TRAINING",
-        "duration_days": 30, "price": 5000, "total_sessions": 12}), 201).get("data") or {}
+        "duration_days": 30, "price": 5000, "total_sessions": 12,
+        "category_id": cats["Personal Training"]}), 201).get("data") or {}
     check("membership must be GENERAL", owner.post("/api/v1/plans", json={**base, "service_type": "DIET"}), 422)
     check("PT needs sessions", owner.post("/api/v1/plans", json={
         **base, "type": "ADD_ON", "service_type": "PERSONAL_TRAINING", "total_sessions": 0}), 422)
@@ -235,7 +239,7 @@ def plan_checks(owner: httpx.Client, trainer: httpx.Client, me: dict) -> None:
 
     # CUSTOM: a membership priced as days × per-day rate; price holds the total, so billing is unchanged.
     custom_base = {"name": f"Smoke Custom 20d {RUN}", "type": "CUSTOM", "service_type": "GENERAL",
-                   "duration_days": 20, "price": 6000}
+                   "duration_days": 20, "price": 6000, "category_id": cats["Custom duration"]}
     custom = check("create custom plan", owner.post("/api/v1/plans", json=custom_base), 201).get("data") or {}
     expect("custom plan stored as total", custom.get("type") == "CUSTOM" and custom.get("price") == 6000.0, custom)
     check("custom must be GENERAL", owner.post("/api/v1/plans", json={**custom_base, "service_type": "DIET"}), 422)
@@ -268,9 +272,15 @@ def lead_checks(owner: httpx.Client, trainer: httpx.Client) -> None:
     print("\n── leads ──")
     today = date.today()
     base = {"name": f"Smoke Lead {RUN}", "phone": phone(10), "location": "Anna Nagar", "goal": "WEIGHT_LOSS",
-            "status": "NEW", "plan_to_join_date": str(today + timedelta(days=7)),
+            "source": "WALK_IN", "status": "NEW", "plan_to_join_date": str(today + timedelta(days=7)),
             "next_follow_up_date": str(today + timedelta(days=2)), "notes": "Walk-in enquiry"}
     lead = check("create lead", owner.post("/api/v1/leads", json=base), 201).get("data") or {}
+    expect("source saved", lead.get("source") == "WALK_IN", lead)
+    expect("attended by = the logged-in account", lead.get("attended_by_name") == "Owner"
+           and lead.get("attended_by_id") is not None, lead)
+    check("lead source required", owner.post("/api/v1/leads",
+                                             json={k: v for k, v in base.items() if k != "source"}), 422)
+    check("lead source must be a known channel", owner.post("/api/v1/leads", json={**base, "source": "TV"}), 422)
     check("lead phone must be 10 digits", owner.post("/api/v1/leads", json={**base, "phone": "12345"}), 422)
     check("lead location required", owner.post("/api/v1/leads", json={**base, "location": ""}), 422)
     check("lead goal must be a FitnessGoal code", owner.post("/api/v1/leads", json={**base, "goal": "Get fit"}), 422)
@@ -278,8 +288,8 @@ def lead_checks(owner: httpx.Client, trainer: httpx.Client) -> None:
                                                      json={k: v for k, v in base.items()
                                                            if k != "next_follow_up_date"}), 422)
     rejected = check("create rejected lead", owner.post("/api/v1/leads", json={
-        **base, "name": f"Smoke Rejected {RUN}", "phone": phone(11), "status": "NOT_INTERESTED"}),
-        201).get("data") or {}
+        **base, "name": f"Smoke Rejected {RUN}", "phone": phone(11), "status": "NOT_INTERESTED",
+        "source": "PHONE_CALL"}), 201).get("data") or {}
 
     ids = lambda body: {x["id"] for x in body.get("data", [])}  # noqa: E731
     all_ = check("list leads search", owner.get("/api/v1/leads", params={"search": RUN}))
@@ -289,6 +299,14 @@ def lead_checks(owner: httpx.Client, trainer: httpx.Client) -> None:
     fu = check("filter followup", owner.get("/api/v1/leads", params={"filter": "followup", "search": RUN}))
     expect("followup filter includes NEW lead with next date", lead.get("id") in ids(fu), fu)
     check("bad filter", owner.get("/api/v1/leads", params={"filter": "nope"}), 422)
+    by_source = check("filter source", owner.get("/api/v1/leads", params={"source": "PHONE_CALL", "search": RUN}))
+    expect("source filter", ids(by_source) == {rejected.get("id")}, by_source)
+    attendants = check("attendants", owner.get("/api/v1/leads/attendants")).get("data") or []
+    owner_id = lead.get("attended_by_id")
+    expect("owner listed as attendant", any(a["id"] == owner_id for a in attendants), attendants)
+    mine = check("filter attended by", owner.get("/api/v1/leads", params={"attended_by": owner_id, "search": RUN}))
+    expect("attended-by filter", {lead.get("id"), rejected.get("id")} <= ids(mine), mine)
+    check("sort by source", owner.get("/api/v1/leads", params={"sort_by": "source", "sort_dir": "asc"}))
 
     upd = check("update lead", owner.put(f"/api/v1/leads/{lead['id']}", json={"goal": "MUSCLE_GAIN"}))
     expect("update applied", upd.get("data", {}).get("goal") == "MUSCLE_GAIN", upd)
@@ -297,7 +315,7 @@ def lead_checks(owner: httpx.Client, trainer: httpx.Client) -> None:
         "notes": "Called, interested", "next_follow_up_date": str(today + timedelta(days=3))})).get("data") or {}
     expect("status defaults FOLLOW_UP", f1.get("status") == "FOLLOW_UP", f1)
     expect("last follow-up = today", f1.get("last_follow_up_date") == str(today), f1)
-    expect("note appended", (f1.get("notes") or "").endswith(f"{today}: Called, interested")
+    expect("note appended with who", (f1.get("notes") or "").endswith(f"{today} [Owner]: Called, interested")
            and "\n---\n" in f1.get("notes", ""), f1)
 
     conv = check("convert lead", owner.post(f"/api/v1/leads/{lead['id']}/convert")).get("data") or {}

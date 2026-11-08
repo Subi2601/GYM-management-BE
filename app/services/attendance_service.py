@@ -24,10 +24,10 @@ from app.repositories.attendance_repository import AttendanceRepository
 from app.repositories.attendance_session_repository import AttendanceSessionRepository
 from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.member_repository import MemberRepository
+from app.repositories.membership_repository import MembershipRepository
+from app.services.settings_service import SettingsService
 
 _CHECK_IN_STATUSES = (AttendanceStatus.PRESENT, AttendanceStatus.LATE)
-# A staff member is late when the day's first check-in is more than this after their shift starts.
-LATE_GRACE = timedelta(minutes=10)
 
 
 def clock(t: time) -> str:
@@ -39,16 +39,20 @@ def minutes_between(start: time, end: time) -> int:
     return max(0, int((datetime.combine(date.min, end) - datetime.combine(date.min, start)).total_seconds() // 60))
 
 
-def is_late(employee: Employee, at: time) -> bool:
-    """First check-in vs the shift it falls in: the morning shift until it ends, otherwise the evening shift."""
-    def with_grace(t: time) -> time:
-        return (datetime.combine(date.min, t) + LATE_GRACE).time()
-
+def day_status(employee: Employee, at: time, grace_minutes: int, half_day_minutes: int) -> AttendanceStatus:
+    """First check-in vs the shift it falls in (the morning shift until it ends, otherwise the evening shift).
+    Gym settings: more than `grace_minutes` after the shift starts = LATE; `half_day_minutes` or more = HALF_DAY
+    (0 = never a half day). No shift times = PRESENT."""
     if employee.morning_start and (employee.morning_end is None or at < employee.morning_end):
-        return at > with_grace(employee.morning_start)
-    if employee.evening_start:
-        return at > with_grace(employee.evening_start)
-    return False
+        start = employee.morning_start
+    elif employee.evening_start:
+        start = employee.evening_start
+    else:
+        return AttendanceStatus.PRESENT
+    after = (datetime.combine(date.min, at) - datetime.combine(date.min, start)).total_seconds() / 60
+    if half_day_minutes and after >= half_day_minutes:
+        return AttendanceStatus.HALF_DAY
+    return AttendanceStatus.LATE if after > grace_minutes else AttendanceStatus.PRESENT
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,7 @@ class AttendanceService:
         self._sessions = AttendanceSessionRepository(db)
         self._employees = EmployeeRepository(db)
         self._members = MemberRepository(db)
+        self._settings = SettingsService(db)
 
     # ── output builders ──────────────────────────────────────────────────
     @staticmethod
@@ -120,10 +125,20 @@ class AttendanceService:
         return employee
 
     async def _require_member(self, member_id: UUID, scope: BranchScope) -> Member:
+        """A member of this branch, or a visitor from another branch on an all-branches plan."""
         member = await self._sessions.get_member(member_id, scope)
+        if member is None:
+            member = await self._sessions.visitor(scope.organization_id, member_id, timeutil.today())
         if member is None:
             raise NotFoundError("Member")
         return member
+
+    async def visitors(self, scope: BranchScope) -> list[dict]:
+        """Members of other branches who may check in here (their plan is valid at all branches)."""
+        branch_id = scope.require_branch()
+        rows = await self._sessions.visitors_for_branch(scope.organization_id, branch_id, timeutil.today())
+        return [{"id": m.id, "name": m.name, "registration_id": m.registration_id, "phone": m.phone,
+                 "home_branch": branch_name} for m, branch_name in rows]
 
     async def _row_out(self, attendance_id: UUID, scope: BranchScope) -> dict:
         a, name, code, role = await self._repo.get_row(attendance_id, scope)
@@ -190,10 +205,16 @@ class AttendanceService:
             if end is None or end < today:
                 reason = "No active membership" if end is None else "Membership expired"
                 if qr:   # kept on the attendance list so the front desk can follow up
-                    await self._sessions.add(self._session(person, today, now, source, actor_id, denied=reason))
+                    await self._sessions.add(self._session(person, today, now, source, actor_id, denied=reason,
+                                                           branch_id=scope.branch_id))
                     await self._sessions.commit()
                     raise BadRequestError(f"{reason}. Contact the front desk to renew.")
                 raise BadRequestError(f"{reason} for {person.name}. Renew the membership to check in.")
+            frozen = await MembershipRepository(self._repo._db).frozen_on(person.member.id, today)
+            if frozen is not None:
+                until = frozen.end_date.strftime("%d-%m-%Y")
+                raise BadRequestError(f"Your membership is frozen till {until}. Ask the front desk to resume it." if qr
+                                      else f"{person.name}'s membership is frozen till {until}. Resume it to check in.")
         if person.employee is not None and person.employee.status == EmployeeStatus.INACTIVE:
             raise BadRequestError("Your staff account is inactive. Contact the manager." if qr
                                   else f"{person.name} is inactive. Change the status to mark attendance.")
@@ -204,13 +225,15 @@ class AttendanceService:
             raise BadRequestError(f"You're already checked in since {since}. Scan CHECK OUT when you leave." if qr
                                   else f"{person.name} is already checked in since {since}")
 
-        await self._sessions.add(self._session(person, today, now, source, actor_id))
-        late = False
+        # Recorded at the branch visited — an all-branches member may be away from their home branch.
+        await self._sessions.add(self._session(person, today, now, source, actor_id, branch_id=scope.branch_id))
+        status = None
         if person.employee is not None:
-            late = await self._staff_day_in(person.employee, today, now, actor_id)
+            status = await self._staff_day_in(person.employee, today, now, actor_id)
         await self._sessions.commit()
-        return {"direction": "IN", "person_type": person.type, "name": person.name, "time": now, "late": late,
-                "duration_minutes": None}
+        return {"direction": "IN", "person_type": person.type, "name": person.name, "time": now,
+                "late": status in (AttendanceStatus.LATE, AttendanceStatus.HALF_DAY),
+                "half_day": status == AttendanceStatus.HALF_DAY, "duration_minutes": None}
 
     async def check_out(self, person: Person, scope: BranchScope, source: AttendanceSource,
                         actor_id: UUID | None) -> dict:
@@ -228,9 +251,9 @@ class AttendanceService:
 
     @staticmethod
     def _session(person: Person, day: date, at: time, source: AttendanceSource, actor_id: UUID | None,
-                 denied: str | None = None) -> AttendanceSession:
+                 denied: str | None = None, branch_id: UUID | None = None) -> AttendanceSession:
         return AttendanceSession(
-            organization_id=person.organization_id, branch_id=person.branch_id, person_type=person.type,
+            organization_id=person.organization_id, branch_id=branch_id or person.branch_id, person_type=person.type,
             employee_id=person.employee.id if person.employee else None,
             member_id=person.member.id if person.member else None,
             session_date=day, check_in_time=at, in_source=source, denied_reason=denied, created_by=actor_id)
@@ -241,26 +264,28 @@ class AttendanceService:
         session.out_source = source
         session.updated_by = actor_id
 
-    async def _staff_day_in(self, employee: Employee, day: date, at: time, actor_id: UUID | None) -> bool:
-        """Keeps the day record in step with a check-in. Returns True when this check-in made the day LATE."""
+    async def _staff_day_in(self, employee: Employee, day: date, at: time,
+                            actor_id: UUID | None) -> AttendanceStatus | None:
+        """Keeps the day record in step with a check-in. Returns the status this check-in gave the day (PRESENT /
+        LATE / HALF_DAY), or None when the day was already marked."""
         scope = BranchScope(employee.organization_id, employee.branch_id, (employee.branch_id,))
         attendance = await self._repo.get_for_employee_date(employee.id, day, scope)
-        late = False
+        s = await self._settings.values(employee.organization_id)
+        status = None
         if attendance is None:
-            late = is_late(employee, at)
+            status = day_status(employee, at, s.late_grace_minutes, s.half_day_after_minutes)
             await self._repo.add(Attendance(
                 organization_id=employee.organization_id, branch_id=employee.branch_id, employee_id=employee.id,
-                attendance_date=day, check_in_time=at,
-                status=AttendanceStatus.LATE if late else AttendanceStatus.PRESENT, created_by=actor_id))
-            return late
+                attendance_date=day, check_in_time=at, status=status, created_by=actor_id))
+            return status
         if attendance.check_in_time is None:
             attendance.check_in_time = at
             if attendance.status not in (*_CHECK_IN_STATUSES, AttendanceStatus.HALF_DAY):   # was absent / leave
-                late = is_late(employee, at)
-                attendance.status = AttendanceStatus.LATE if late else AttendanceStatus.PRESENT
+                status = day_status(employee, at, s.late_grace_minutes, s.half_day_after_minutes)
+                attendance.status = status
         attendance.check_out_time = None        # back inside
         attendance.updated_by = actor_id
-        return late
+        return status
 
     async def _staff_day_out(self, employee_id: UUID, day: date, at: time, scope: BranchScope,
                              actor_id: UUID | None) -> None:

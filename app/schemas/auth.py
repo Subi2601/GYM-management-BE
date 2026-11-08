@@ -61,9 +61,13 @@ class MeUser(TessBaseSchema):
     name: str
     email: str
     role: AccountRole
+    role_name: str | None = None              # the gym role (Owner, Sub-admin, Manager, Staff or the gym's own)
+    role_level: int | None = None
     is_superadmin: bool
     organization_id: UUID | None = None
     organization_name: str | None = None
+    organization_code: str | None = None      # Gym ID
+    organization_logo_url: str | None = None  # public logo (Gym Settings)
     branch_id: UUID | None = None
 
 

@@ -90,6 +90,29 @@ class OrganizationRepository(BaseRepository):
             stmt = stmt.where(Branch.branch_name.ilike(pattern) | Branch.location.ilike(pattern))
         return await self.paginate_scalars(stmt.order_by(Branch.created_at), offset=offset, limit=limit)
 
+    async def branch_counts(self, branch_ids: list[UUID]) -> dict[UUID, tuple[int, int]]:
+        """branch_id → (members, active staff)."""
+        if not branch_ids:
+            return {}
+        from app.core.enums import EmployeeStatus
+        from app.models.member import Member
+        from app.models.staff import Employee
+        members = dict((await self._db.execute(
+            select(Member.branch_id, func.count(Member.id)).where(Member.branch_id.in_(branch_ids),
+                                                                  Member.is_delete.is_(False))
+            .group_by(Member.branch_id))).all())
+        staff = dict((await self._db.execute(
+            select(Employee.branch_id, func.count(Employee.id)).where(Employee.branch_id.in_(branch_ids),
+                                                                      Employee.is_delete.is_(False),
+                                                                      Employee.status == EmployeeStatus.ACTIVE)
+            .group_by(Employee.branch_id))).all())
+        return {b: (members.get(b, 0), staff.get(b, 0)) for b in branch_ids}
+
+    async def clear_head_office(self, org_id: UUID, keep_id: UUID) -> None:
+        for b in await self.list_branches(org_id):
+            if b.id != keep_id and b.is_head_office:
+                b.is_head_office = False
+
     async def branch_owner_emails(self, branch_ids: list[UUID]) -> dict[UUID, str]:
         """branch_id → email of its OWNER login (oldest per branch), same rule as branch_owner_login."""
         if not branch_ids:

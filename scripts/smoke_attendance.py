@@ -108,7 +108,9 @@ def main() -> None:
     row = next((r for r in daily["records"] if r["employee_id"] == staff["id"]), None)
     expect("staff day row from QR", row is not None and row["source"] == "QR" and row["visits"] == 1
            and row["check_out_time"] is not None and not row["inside"], row)
-    expect("staff marked present/late", row is not None and row["status"] in ("PRESENT", "LATE"), row)
+    # Status depends on the time the test runs vs the shift (late grace / half day from Gym settings).
+    expect("staff marked present / late / half day", row is not None
+           and row["status"] in ("PRESENT", "LATE", "HALF_DAY"), row)
     check("staff scan IN (2nd visit)", p1.post(f"{url}/scan", json={"direction": "in", **GYM}))
     row = next(r for r in check("staff daily again", owner.get("/api/v1/attendance/daily"))["data"]["records"]
                if r["employee_id"] == staff["id"])

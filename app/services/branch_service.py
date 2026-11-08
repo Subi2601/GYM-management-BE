@@ -14,6 +14,8 @@ from shared.exceptions.http_exceptions import BadRequestError, ConflictError, No
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import AccountRole
+from app.services.role_service import RoleService
+from app.utils.rbac_catalog import OWNER_ROLE
 from app.core.security import hash_password
 from app.models.organization import Branch
 from app.models.user import User
@@ -37,13 +39,28 @@ class BranchService:
     def __init__(self, db: AsyncSession) -> None:
         self._orgs = OrganizationRepository(db)
         self._users = UserRepository(db)
+        self._roles = RoleService(db)
 
     # ── output builder ───────────────────────────────────────────────────
     @staticmethod
-    def branch_out(b: Branch, login_email: str | None) -> dict:
+    def branch_out(b: Branch, login_email: str | None, counts: tuple[int, int] = (0, 0)) -> dict:
         return {"id": b.id, "organization_id": b.organization_id, "branch_name": b.branch_name,
-                "location": b.location, "login_email": login_email,
+                "location": b.location, "login_email": login_email, "phone": b.phone, "email": b.email,
+                "gstin": b.gstin, "is_head_office": b.is_head_office,
+                "members_count": counts[0], "staff_count": counts[1],
                 "created_at": b.created_at, "updated_at": b.updated_at}
+
+    async def _contacts(self, branch: Branch, data, actor_id) -> None:
+        """Phone / email / GSTIN (free text, not unique) and the head office flag (one per gym)."""
+        sent = data.model_fields_set
+        for field in ("phone", "email", "gstin"):
+            if field in sent:
+                value = getattr(data, field)
+                setattr(branch, field, (value.strip() if isinstance(value, str) else value) or None)
+        if "is_head_office" in sent and data.is_head_office is not None:
+            if data.is_head_office:
+                await self._orgs.clear_head_office(branch.organization_id, branch.id)
+            branch.is_head_office = data.is_head_office
 
     # ── shared provisioning (also used by organization onboarding) ───────
     async def ensure_login_email_free(self, email: str) -> None:
@@ -56,9 +73,8 @@ class BranchService:
         if await self._users.count_branch_users(branch_id) >= MAX_USERS_PER_BRANCH:
             raise BadRequestError(f"User limit reached for this branch (max {MAX_USERS_PER_BRANCH} users)")
         await self.ensure_login_email_free(email)
-        role = await self._users.get_role_by_code(AccountRole.OWNER.value)
-        if role is None:
-            raise BadRequestError("OWNER role is not configured — run the seed")
+        # A new gym gets its Owner / Sub-admin / Manager / Staff roles here (no-op when they exist).
+        role = (await self._roles.ensure_org_roles(organization_id, actor_id))[OWNER_ROLE]
         user = await self._users.add(User(
             organization_id=organization_id, branch_id=branch_id, name=name, email=email.lower(),
             password_hash=hash_password(password), role=AccountRole.OWNER, created_by=actor_id))
@@ -70,13 +86,15 @@ class BranchService:
                             search: str | None) -> tuple[list[dict], int]:
         org_id = _require_org(ctx)
         branches, total = await self._orgs.page_branches(org_id, offset=offset, limit=limit, search=search)
-        emails = await self._orgs.branch_owner_emails([b.id for b in branches])
-        return [self.branch_out(b, emails.get(b.id)) for b in branches], total
+        ids = [b.id for b in branches]
+        emails, counts = await self._orgs.branch_owner_emails(ids), await self._orgs.branch_counts(ids)
+        return [self.branch_out(b, emails.get(b.id), counts.get(b.id, (0, 0))) for b in branches], total
 
     async def get_branch(self, branch_id: UUID, ctx: RequestContext) -> dict:
         branch = await self._get(branch_id, ctx)
         login = await self._orgs.branch_owner_login(branch.id)
-        return self.branch_out(branch, login.email if login else None)
+        counts = (await self._orgs.branch_counts([branch.id])).get(branch.id, (0, 0))
+        return self.branch_out(branch, login.email if login else None, counts)
 
     async def _get(self, branch_id: UUID, ctx: RequestContext) -> Branch:
         branch = await self._orgs.get_branch(_require_org(ctx), branch_id)
@@ -92,6 +110,7 @@ class BranchService:
         await self.ensure_login_email_free(data.login_email)
         branch = await self._orgs.add(Branch(organization_id=org_id, branch_name=data.branch_name,
                                              location=data.location, created_by=ctx.user_id))
+        await self._contacts(branch, data, ctx.user_id)
         await self.create_owner_login(organization_id=org_id, branch_id=branch.id,
                                       name=f"{data.branch_name} Admin", email=data.login_email,
                                       password=data.login_password, actor_id=ctx.user_id)
@@ -107,6 +126,7 @@ class BranchService:
             branch.branch_name = data.branch_name
         if "location" in sent:
             branch.location = data.location
+        await self._contacts(branch, data, ctx.user_id)
         branch.updated_by = ctx.user_id
         await self._orgs.commit()
         return await self.get_branch(branch.id, ctx)
@@ -115,6 +135,8 @@ class BranchService:
         branch = await self._get(branch_id, ctx)
         if await self._orgs.count_branches(branch.organization_id) <= 1:
             raise BadRequestError("Cannot delete the organization's last branch")
+        if branch.is_head_office:
+            raise BadRequestError("This is the head office. Make another branch the head office first")
         me = await self._users.get_user(ctx.user_id)
         if me is not None and me.branch_id == branch.id:
             raise BadRequestError("You cannot delete your own home branch")

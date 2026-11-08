@@ -37,6 +37,9 @@ class PaymentController:
     async def invoice(self, payment_id: UUID, scope: BranchScope) -> ResponseEnvelope[InvoiceResponse]:
         return ResponseEnvelope.ok(InvoiceResponse(**await self._service.invoice(payment_id, scope)))
 
+    async def public_invoice(self, token: str) -> ResponseEnvelope[InvoiceResponse]:
+        return ResponseEnvelope.ok(InvoiceResponse(**await self._service.public_invoice(token)))
+
     async def create_payment(self, body: PaymentCreate, scope: BranchScope,
                              ctx: RequestContext) -> ResponseEnvelope[PaymentResponse]:
         data = await self._service.create_payment(body, scope, ctx)

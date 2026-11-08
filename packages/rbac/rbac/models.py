@@ -1,7 +1,8 @@
 """
 RBAC SQLAlchemy models — shared package.
 Fully dynamic — all values created at runtime, no hardcoded enums.
-Single-tenant: one role set, no tenant scoping.
+Roles may belong to a tenant (`organization_id`, NULL = shared) and carry a `level` for hierarchies; the
+module / screen / permission catalogue stays shared.
 """
 from __future__ import annotations
 
@@ -64,14 +65,20 @@ class RBACPermission(BaseModel):
 
 class RBACRole(BaseModel):
     """
-    Operator role definition (e.g. ADMIN, CONTROLLER, OPERATOR, AUDITOR).
-    is_system=true roles cannot be deleted or deactivated.
+    Role definition (e.g. OWNER, SUB_ADMIN, MANAGER, STAFF or a tenant's own role).
+    is_system=true roles cannot be deleted. `level` orders roles: a user may only create / assign roles below their
+    own level. Codes are unique per tenant.
     """
     __tablename__ = "rbac_roles"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_rbac_roles_org_code"),
+    )
 
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    level: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=10, server_default=text("10"))
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
 
