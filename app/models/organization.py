@@ -6,7 +6,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import (Boolean, Float, ForeignKey, Integer, LargeBinary, Numeric, SmallInteger, String,
-                        UniqueConstraint, text)
+                        UniqueConstraint, text, Index, func)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,7 +64,9 @@ class Organization(BaseModel):
 class Branch(BaseModel):
     __tablename__ = "org_branches"
     __table_args__ = (
-        UniqueConstraint("organization_id", "branch_name", name="uq_org_branches_org_name"),
+        # Name unique among live branches only (case-insensitive) — a deleted branch's name can be reused.
+        Index("uq_org_branches_org_name_live", "organization_id", func.lower(text("branch_name")),
+              unique=True, postgresql_where=text("is_delete = false")),
         UniqueConstraint("checkin_token", name="uq_org_branches_checkin_token"),
         UniqueConstraint("enquiry_token", name="uq_org_branches_enquiry_token"),
     )

@@ -59,10 +59,11 @@ class OrganizationRepository(BaseRepository):
         return (await self._db.execute(stmt)).first() is not None
 
     async def branch_name_taken(self, org_id: UUID, name: str, exclude_id: UUID | None = None) -> bool:
-        stmt = select(Branch.id).where(Branch.organization_id == org_id,
+        stmt = select(Branch.id).where(Branch.organization_id == org_id, Branch.is_delete.is_(False),
                                        func.lower(Branch.branch_name) == name.lower())
+    
         if exclude_id is not None:
-            stmt = stmt.where(Branch.id != exclude_id)
+            stmt = stmt.where(Branch.id != exclude_id, )
         return (await self._db.execute(stmt.limit(1))).first() is not None
 
     # ── listings ─────────────────────────────────────────────────────────
