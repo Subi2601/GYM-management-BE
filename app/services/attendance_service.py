@@ -111,11 +111,16 @@ class AttendanceService:
                 "source": sessions[0].in_source if sessions else None}
 
     @staticmethod
-    def member_session_out(s: AttendanceSession, name: str, registration_id: str, phone: str) -> dict:
+    def member_session_out(s: AttendanceSession, name: str, registration_id: str, phone: str,
+                           home_branch_id: UUID, home_branch: str, attendance_branch_id: UUID,
+                           attendance_branch: str) -> dict:
         return {"id": s.id, "member_id": s.member_id, "member_name": name, "registration_id": registration_id,
                 "phone": phone, "session_date": s.session_date, "check_in_time": s.check_in_time,
                 "check_out_time": s.check_out_time, "in_source": s.in_source, "out_source": s.out_source,
                 "denied_reason": s.denied_reason,
+                "home_branch_id": home_branch_id, "home_branch": home_branch,
+                "attendance_branch_id": attendance_branch_id, "attendance_branch": attendance_branch,
+                "is_visiting": home_branch_id != attendance_branch_id,
                 "duration_minutes": minutes_between(s.check_in_time, s.check_out_time) if s.check_out_time else None}
 
     async def _require_employee(self, employee_id: UUID, scope: BranchScope) -> Employee:
@@ -125,7 +130,7 @@ class AttendanceService:
         return employee
 
     async def _require_member(self, member_id: UUID, scope: BranchScope) -> Member:
-        """A member of this branch, or a visitor from another branch on an all-branches plan."""
+        """A member of this branch, or a visitor from another branch with a current membership."""
         member = await self._sessions.get_member(member_id, scope)
         if member is None:
             member = await self._sessions.visitor(scope.organization_id, member_id, timeutil.today())
@@ -134,7 +139,7 @@ class AttendanceService:
         return member
 
     async def visitors(self, scope: BranchScope) -> list[dict]:
-        """Members of other branches who may check in here (their plan is valid at all branches)."""
+        """Members of other branches with a current membership who may check in here."""
         branch_id = scope.require_branch()
         rows = await self._sessions.visitors_for_branch(scope.organization_id, branch_id, timeutil.today())
         return [{"id": m.id, "name": m.name, "registration_id": m.registration_id, "phone": m.phone,
@@ -225,7 +230,7 @@ class AttendanceService:
             raise BadRequestError(f"You're already checked in since {since}. Scan CHECK OUT when you leave." if qr
                                   else f"{person.name} is already checked in since {since}")
 
-        # Recorded at the branch visited — an all-branches member may be away from their home branch.
+        # Record the branch visited, not the member's home branch.
         await self._sessions.add(self._session(person, today, now, source, actor_id, branch_id=scope.branch_id))
         status = None
         if person.employee is not None:

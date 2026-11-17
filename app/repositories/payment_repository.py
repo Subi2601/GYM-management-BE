@@ -19,15 +19,16 @@ from app.repositories.base import BaseRepository
 
 class PaymentRepository(BaseRepository):
 
-    async def lock_receipt_sequence(self, organization_id: UUID) -> None:
-        """Transaction-scoped advisory lock so concurrent payments of one organization get distinct receipts."""
+    async def lock_receipt_sequence(self, organization_id: UUID, branch_id: UUID) -> None:
+        """Transaction-scoped advisory lock so concurrent payments in one branch get distinct receipts."""
         await self._db.execute(select(func.pg_advisory_xact_lock(
-            func.hashtext(func.concat("payment_receipt:", str(organization_id))))))
+            func.hashtext(func.concat("payment_receipt:", str(organization_id), ":", str(branch_id))))))
 
-    async def last_receipt_number(self, organization_id: UUID) -> int:
-        """Highest numeric suffix of REC-#### receipts in the organization (deleted rows included)."""
+    async def last_receipt_number(self, organization_id: UUID, branch_id: UUID) -> int:
+        """Highest numeric suffix of REC-#### receipts in this branch (deleted rows included)."""
         num = cast(func.substring(Payment.receipt_no, 5), Integer)
         stmt = select(func.max(num)).where(Payment.organization_id == organization_id,
+                                           Payment.branch_id == branch_id,
                                            Payment.receipt_no.op("~")(r"^REC-\d+$"))
         return (await self._db.execute(stmt)).scalar_one() or 0
 

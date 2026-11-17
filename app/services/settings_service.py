@@ -37,7 +37,7 @@ class GymSettings:
     transfer_within_days: int = 30
     refund_within_days: int = 7
     refund_deduction_percent: Decimal = Decimal(10)
-    # Read-only here (the gym's identity): shown as Gym ID; member ids use member_id_prefix or the code.
+    # Read-only here (the gym's identity): shown as Gym ID; member ids use the fixed SG prefix.
     gym_code: str = ""
     member_id_prefix: str = "SG"
 
@@ -52,7 +52,7 @@ class SettingsService:
     @staticmethod
     def _out(org: Organization) -> GymSettings:
         return GymSettings(**{f: getattr(org, f) for f in FIELDS}, gym_code=org.code,
-                           member_id_prefix=org.member_id_prefix or org.code)
+                           member_id_prefix="SG")
 
     async def values(self, organization_id: UUID) -> GymSettings:
         org = await self._repo.get_org(organization_id)

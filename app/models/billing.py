@@ -84,7 +84,7 @@ class Plan(BranchScopedMixin, BaseModel):
 class Payment(BranchScopedMixin, BaseModel):
     __tablename__ = "payment_payments"
     __table_args__ = (
-        UniqueConstraint("organization_id", "receipt_no", name="uq_payment_payments_org_receipt"),
+        UniqueConstraint("branch_id", "receipt_no", name="uq_payment_payments_branch_receipt"),
     )
 
     receipt_no: Mapped[str] = mapped_column(String(20), nullable=False)  # REC-0001

@@ -87,8 +87,8 @@ class PaymentService:
         if paid > net:
             raise BadRequestError(f"Paid amount ({paid}) cannot exceed the payable amount ({net})")
         balance = net - paid
-        await self._repo.lock_receipt_sequence(scope.organization_id)
-        receipt_no = f"REC-{await self._repo.last_receipt_number(scope.organization_id) + 1:04d}"
+        await self._repo.lock_receipt_sequence(scope.organization_id, branch_id)
+        receipt_no = f"REC-{await self._repo.last_receipt_number(scope.organization_id, branch_id) + 1:04d}"
         payment = Payment(
             organization_id=scope.organization_id, branch_id=branch_id, receipt_no=receipt_no,
             member_id=member_id, pt_subscription_id=pt_subscription_id,

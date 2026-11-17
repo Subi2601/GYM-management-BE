@@ -44,7 +44,7 @@ class Organization(BaseModel):
                                                         server_default=text("30"))
     # Members with an active membership but no visit for this many days show on Members → "Not coming".
     absent_alert_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=7, server_default=text("7"))
-    # Member registration ids: <prefix>-001. NULL = the gym code.
+    # Member registration ids use the SG-001 format across gyms.
     member_id_prefix: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # Membership freeze: total days and number of freezes per membership (a member's own allowance overrides
     # the days; 0 days = only members given their own allowance can freeze).
