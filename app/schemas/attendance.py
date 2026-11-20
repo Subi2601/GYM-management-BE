@@ -73,7 +73,7 @@ class MemberCheckIn(FormSchema):
 
 
 class VisitingMember(TessBaseSchema):
-    """A member of another branch whose plan is valid at all branches (manual check-in list)."""
+    """A member from another home branch with a current membership (manual check-in list)."""
     id: UUID
     name: str
     registration_id: str
@@ -91,6 +91,11 @@ class MemberSessionResponse(UUIDSchema):
     member_name: str
     registration_id: str
     phone: str
+    home_branch_id: UUID
+    home_branch: str
+    attendance_branch_id: UUID
+    attendance_branch: str
+    is_visiting: bool
     session_date: dt.date
     check_in_time: dt.time
     check_out_time: dt.time | None = None

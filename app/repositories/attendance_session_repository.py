@@ -48,13 +48,20 @@ class AttendanceSessionRepository(BaseRepository):
         return list((await self._db.execute(stmt.order_by(AttendanceSession.check_in_time.asc()))).scalars().all())
 
     def _member_rows(self, scope: BranchScope):
-        stmt = (select(AttendanceSession, Member.name, Member.registration_id, Member.phone)
+        home_branch = aliased(Branch, name="home_branch")
+        visit_branch = aliased(Branch, name="visit_branch")
+        stmt = (select(AttendanceSession, Member.name, Member.registration_id, Member.phone,
+                       Member.branch_id.label("home_branch_id"), home_branch.branch_name.label("home_branch"),
+                       AttendanceSession.branch_id.label("attendance_branch_id"),
+                       visit_branch.branch_name.label("attendance_branch"))
                 .join(Member, Member.id == AttendanceSession.member_id)
+                .join(home_branch, home_branch.id == Member.branch_id)
+                .join(visit_branch, visit_branch.id == AttendanceSession.branch_id)
                 .where(AttendanceSession.person_type == AttendancePersonType.MEMBER, Member.is_delete.is_(False)))
         return self.scoped(AttendanceSession, stmt, scope)
 
     async def member_sessions(self, scope: BranchScope, day: date) -> list:
-        """Rows (session, member name, registration id, phone) of `day`, newest check-in first."""
+        """Member visits with home and check-in branches, newest check-in first."""
         stmt = self._member_rows(scope).where(AttendanceSession.session_date == day)
         stmt = stmt.order_by(AttendanceSession.check_in_time.desc(), AttendanceSession.created_at.desc())
         return list((await self._db.execute(stmt)).all())
@@ -78,30 +85,32 @@ class AttendanceSessionRepository(BaseRepository):
     async def get_member(self, member_id: UUID, scope: BranchScope) -> Member | None:
         return await self.get_scoped(Member, member_id, scope)
 
-    # ── members visiting from another branch (plan valid at all branches) ──
+    # ── members visiting from another branch ──────────────────────────────
     def _visitors(self, organization_id: UUID, today: date):
-        """Members whose latest membership is on an all-branches plan and still running."""
+        """Members whose latest membership is still running, regardless of which branch sold the plan."""
         rn = func.row_number().over(partition_by=Subscription.member_id,
                                     order_by=(Subscription.start_date.desc(), Subscription.created_at.desc()))
-        latest = (select(Subscription.member_id, Subscription.end_date, Plan.all_branches, rn.label("rn"))
+        latest = (select(Subscription.member_id, Subscription.end_date, rn.label("rn"))
                   .join(Plan, Plan.id == Subscription.plan_id)
                   .where(Subscription.organization_id == organization_id, Subscription.is_delete.is_(False),
                          Plan.type.in_(MEMBERSHIP_PLAN_TYPES))
                   .subquery())
         return (select(Member).join(latest, latest.c.member_id == Member.id)
-                .where(latest.c.rn == 1, latest.c.all_branches.is_(True), latest.c.end_date >= today,
+                .where(latest.c.rn == 1, latest.c.end_date >= today,
                        Member.organization_id == organization_id, Member.is_delete.is_(False)))
 
     async def visitor(self, organization_id: UUID, member_id: UUID, today: date) -> Member | None:
         stmt = self._visitors(organization_id, today).where(Member.id == member_id)
         return (await self._db.execute(stmt)).scalar_one_or_none()
 
-    async def visitor_by_phone(self, organization_id: UUID, phone: str, today: date) -> Member | None:
-        stmt = self._visitors(organization_id, today).where(Member.phone == phone)
-        return (await self._db.execute(stmt.limit(1))).scalars().first()
+    async def visitors_by_phone(self, organization_id: UUID, branch_id: UUID, phone: str,
+                                today: date) -> list[Member]:
+        stmt = self._visitors(organization_id, today).where(
+            Member.phone == phone, Member.branch_id != branch_id)
+        return list((await self._db.execute(stmt.order_by(Member.registration_id))).scalars().all())
 
     async def visitors_for_branch(self, organization_id: UUID, branch_id: UUID, today: date) -> list:
-        """Rows (member, home branch name) who may check in here although they belong to another branch."""
+        """Members with a current membership who may check in here from another home branch."""
         stmt = (self._visitors(organization_id, today).add_columns(Branch.branch_name)
                 .join(Branch, Branch.id == Member.branch_id).where(Member.branch_id != branch_id))
         return list((await self._db.execute(stmt.order_by(Member.name))).all())

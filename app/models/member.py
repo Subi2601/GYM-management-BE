@@ -16,7 +16,7 @@ from app.models.base import BaseModel, BranchScopedMixin
 class Member(BranchScopedMixin, BaseModel):
     __tablename__ = "member_members"
     __table_args__ = (
-        UniqueConstraint("organization_id", "registration_id", name="uq_member_members_org_reg"),
+        UniqueConstraint("branch_id", "registration_id", name="uq_member_members_branch_reg"),
         UniqueConstraint("branch_id", "phone", name="uq_member_members_branch_phone"),
     )
 

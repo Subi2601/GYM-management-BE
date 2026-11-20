@@ -43,6 +43,11 @@ def _state_condition(latest, last_visit, state_filter: str | None, today: date, 
 
 class MemberRepository(BaseRepository):
 
+    async def lock_registration_sequence(self, organization_id: UUID, branch_id: UUID) -> None:
+        """Serialize member-id allocation within a branch."""
+        await self._db.execute(select(func.pg_advisory_xact_lock(
+            func.hashtext(func.concat("member_registration:", str(organization_id), ":", str(branch_id))))))
+
     def _latest_membership(self):
         """Latest MEMBERSHIP subscription per member (start_date desc, created_at desc)."""
         rn = func.row_number().over(partition_by=Subscription.member_id,
@@ -142,10 +147,11 @@ class MemberRepository(BaseRepository):
         stmt = self.alive(Member, select(Member).where(Member.branch_id == branch_id, Member.phone == phone))
         return (await self._db.execute(stmt)).scalar_one_or_none()
 
-    async def last_registration_number(self, organization_id: UUID, prefix: str) -> int:
-        """Highest numeric suffix of <prefix>-### registration ids in the organization (deleted rows included)."""
+    async def last_registration_number(self, organization_id: UUID, branch_id: UUID, prefix: str) -> int:
+        """Highest numeric suffix of <prefix>-### registration ids in this branch, including deleted rows."""
         num = cast(func.substring(Member.registration_id, len(prefix) + 2), Integer)
         stmt = select(func.max(num)).where(Member.organization_id == organization_id,
+                                           Member.branch_id == branch_id,
                                            Member.registration_id.op("~")(rf"^{re.escape(prefix)}-\d+$"))
         return (await self._db.execute(stmt)).scalar_one() or 0
 

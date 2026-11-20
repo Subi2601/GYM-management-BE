@@ -123,8 +123,8 @@ PyJWT HS256 · bcrypt (cost 12) · cryptography (Fernet). No Redis / Celery / ba
   `OfferService.apply_bonus`) and a free item; the bonus text is stored on `payment.offer_bonus` and printed.
 - **Members "Not coming"** tab (`filter=absent`): running membership, no check-in for `absent_alert_days` (counted from
   the start for people who never came), not frozen today; list rows carry `last_visit_date`.
-- **Gym ID** = `org_organizations.code` (in `/auth/me` as `organization_code`, invoices, settings). Member ids are
-  `<member_id_prefix or code>-###` (existing gyms keep `SG`).
+- **Gym ID** = `org_organizations.code` (in `/auth/me` as `organization_code`, invoices, settings). Member ids use
+  the fixed `SG-###` format, with the numeric sequence independent per branch.
 - **Client assessments** (`/api/v1/assessments`, view `member:list`, write `member:update`): vitals, lifestyle,
   injuries / surgeries, posture notes, movement ratings (`movements` JSONB); the newest updates the member's
   height / weight.

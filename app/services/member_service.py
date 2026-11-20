@@ -86,9 +86,11 @@ class MemberService:
         return self.member_out(*row, show_pii=show_pii, today=timeutil.today(), due_days=await self._due_days(scope))
 
     async def next_registration_id(self, scope: BranchScope) -> str:
-        """<prefix>-001: the gym's member id prefix (Gym settings), the gym code by default."""
+        """<prefix>-001: the gym's member id prefix (Gym settings), sequenced independently per branch."""
         prefix = (await self._settings.values(scope.organization_id)).member_id_prefix
-        return f"{prefix}-{await self._repo.last_registration_number(scope.organization_id, prefix) + 1:03d}"
+        branch_id = scope.require_branch()
+        number = await self._repo.last_registration_number(scope.organization_id, branch_id, prefix)
+        return f"{prefix}-{number + 1:03d}"
 
     async def counts(self, scope: BranchScope) -> dict:
         s = await self._settings.values(scope.organization_id)
@@ -105,6 +107,7 @@ class MemberService:
 
     async def _build_member(self, data, scope: BranchScope, branch_id: UUID, actor: RequestContext) -> Member:
         """Shared by create_member and lead conversion — caller commits."""
+        await self._repo.lock_registration_sequence(scope.organization_id, branch_id)
         member = Member(
             organization_id=scope.organization_id, branch_id=branch_id,
             registration_id=await self.next_registration_id(scope),

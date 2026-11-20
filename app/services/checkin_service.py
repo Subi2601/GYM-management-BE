@@ -81,8 +81,8 @@ class CheckinService:
 
     async def _linked_person(self, branch: Branch, device_token: str | None) -> tuple[AttendanceDevice, Person] | None:
         """The person this phone is linked to, if they may check in at this branch (None = verify first).
-        Staff: their own branch only. Members: their home branch, or any branch while on an all-branches plan —
-        one phone link works everywhere they are allowed."""
+        Staff: their own branch only. Members: any branch in their organization while their membership is current —
+        one phone link works across all branches."""
         if not device_token:
             return None
         device = await self._repo.device_by_hash(_hash(device_token))
@@ -122,14 +122,24 @@ class CheckinService:
         typed = _id_number(body.id_number)
         employee = await self._repo.staff_by_phone(branch.id, phone)
         member = await self._repo.member_by_phone(branch.id, phone)
-        if member is None:   # visiting from another branch on an all-branches plan
-            member = await self._repo.visitor_by_phone(branch.organization_id, phone, timeutil.today())
         # The same number can belong to a staff member and a member — the ID number decides.
         person: Person | None = None
         if employee is not None and typed is not None and _id_number(employee.employee_code) == typed:
             person = Person.staff(employee)
-        elif member is not None and typed is not None and _id_number(member.registration_id) == typed:
-            person = Person.of_member(member)
+        elif typed is not None:
+            if member is not None and _id_number(member.registration_id) == typed:
+                person = Person.of_member(member)
+            else:
+                candidates = await self._repo.visitors_by_phone(
+                    branch.organization_id, branch.id, phone, timeutil.today())
+                matches = [candidate for candidate in candidates
+                           if _id_number(candidate.registration_id) == typed]
+                if len(matches) == 1:
+                    person = Person.of_member(matches[0])
+                elif len(matches) > 1:
+                    raise BadRequestError(
+                        "This phone number and member ID match members from multiple branches. "
+                        "Please ask the front desk to check you in")
         if person is None:
             _FAILED_ID.hit(limit_key)
             raise BadRequestError("Phone number and ID number don't match our records. Check them or ask the front desk")

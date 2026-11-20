@@ -58,7 +58,7 @@ async def members_daily(date: date | None = Query(default=None), scope: BranchSc
             dependencies=[Depends(require_permission("attendance:mark"))])
 async def visiting_members(scope: BranchScope = Depends(get_branch_scope),
                            controller: AttendanceController = Depends()):
-    """Members of other branches on an all-branches plan — they may check in here too."""
+    """Members of other branches with a current membership may check in here too."""
     return await controller.visitors(scope)
 
 
