@@ -22,7 +22,7 @@ class LeadCreate(FormSchema):
     goal: FitnessGoal
     source: LeadSource
     status: LeadStatus
-    plan_to_join_date: date
+    plan_to_join_date: date | None = None     # optional: walk-in / phone enquiries often have no date yet
     next_follow_up_date: date
     notes: str | None = Field(default=None, max_length=5000)
     referred_by_id: UUID | None = None        # source REFERRAL: the member who sent them

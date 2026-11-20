@@ -20,7 +20,7 @@ from app.services.settings_service import GymSettings, SettingsService
 
 _FIELDS = ("name", "phone", "location", "goal", "source", "status", "plan_to_join_date", "next_follow_up_date",
            "notes", "referred_by_id")
-_REQUIRED = ("name", "phone", "location", "goal", "source", "status", "plan_to_join_date")
+_REQUIRED = ("name", "phone", "location", "goal", "source", "status")   # plan_to_join_date may be cleared
 NOTE_SEPARATOR = "\n---\n"
 # How far back / ahead the desk may date a trial (a walk-in who started yesterday, a booking for next week).
 TRIAL_BACKDATE_DAYS, TRIAL_AHEAD_DAYS = 7, 30
