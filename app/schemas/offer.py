@@ -23,6 +23,8 @@ class OfferCreate(FormSchema):
     is_active: bool = True
     # Plan categories the offer applies to; empty = every plan.
     category_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    # True = common offer, available in every branch (owner / all-branch roles only).
+    common: bool = False
 
     @model_validator(mode="after")
     def _gives_something(self) -> "OfferCreate":
@@ -42,6 +44,7 @@ class OfferUpdate(FormSchema):
     description: str | None = Field(default=None, max_length=200)
     is_active: bool | None = None
     category_ids: list[UUID] | None = Field(default=None, max_length=100)
+    common: bool | None = None
 
 
 class OfferStatusUpdate(FormSchema):
@@ -62,6 +65,8 @@ class OfferResponse(UUIDSchema, TimestampMixin):
     # Derived: switched on AND today is inside the date window — what billing screens offer.
     available: bool
     category_ids: list[UUID] = []     # empty = applies to every plan
+    branch_id: UUID | None = None     # None = common offer
+    common: bool = False              # available in every branch of the gym
 
 
 class OfferCounts(TessBaseSchema):

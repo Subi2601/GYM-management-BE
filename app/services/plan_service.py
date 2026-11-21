@@ -13,6 +13,7 @@ from app.core.scope import BranchScope
 from app.models.billing import Plan, default_upgrade_window
 from app.repositories.plan_repository import PlanRepository
 from app.services.plan_category_service import PlanCategoryService
+from app.services.scope_service import ScopeService
 
 _FIELDS = ("name", "category_id", "type", "service_type", "duration_months", "duration_days", "price",
            "total_sessions", "group_size", "free_members", "id_check", "all_branches", "upgrade_window_days", "is_active",
@@ -50,10 +51,12 @@ class PlanService:
     def __init__(self, db: AsyncSession) -> None:
         self._repo = PlanRepository(db)
         self._categories = PlanCategoryService(db)
+        self._scope = ScopeService(db)
 
     @staticmethod
     def plan_out(p: Plan, category_name: str) -> dict:
-        return {"id": p.id, "branch_id": p.branch_id, "name": p.name, "category_id": p.category_id,
+        return {"id": p.id, "branch_id": p.branch_id, "common": p.is_common, "name": p.name,
+                "category_id": p.category_id,
                 "category_name": category_name, "type": p.type, "service_type": p.service_type,
                 "duration_months": p.duration_months, "duration_days": p.duration_days, "price": float(p.price),
                 "total_sessions": p.total_sessions, "group_size": p.group_size, "free_members": p.free_members,
@@ -102,8 +105,19 @@ class PlanService:
             p["refundable"], p["refund_window_days"] = False, None
         return p
 
+    async def _can_change(self, plan: Plan, scope: BranchScope, actor: RequestContext) -> None:
+        """Common plans: all-branch roles only (from any view). Branch plans: from that branch."""
+        if plan.is_common:
+            await self._scope.require_common_access(actor)
+        else:
+            scope.require_branch()
+
     async def create_plan(self, data, scope: BranchScope, actor: RequestContext) -> dict:
-        branch_id = scope.require_branch()
+        if data.common:
+            await self._scope.require_common_access(actor)
+            branch_id = None
+        else:
+            branch_id = scope.require_branch()
         await self._categories.require(data.category_id, scope.organization_id)
         p = self._normalise({f: getattr(data, f) for f in _FIELDS})
         _check_rules(p)
@@ -114,9 +128,18 @@ class PlanService:
         return await self.get_plan(plan.id, scope)
 
     async def update_plan(self, plan_id: UUID, data, scope: BranchScope, actor: RequestContext) -> dict:
-        scope.require_branch()
         plan = await self._get(plan_id, scope)
+        await self._can_change(plan, scope, actor)
         sent = data.model_fields_set
+        if "common" in sent and data.common is not None and data.common != plan.is_common:
+            if data.common:                              # branch plan → every branch
+                await self._scope.require_common_access(actor)
+                plan.branch_id = None
+            else:                                        # common → only the selected branch
+                if await self._repo.is_in_use(plan.id):
+                    raise BadRequestError("Members are already on this common plan, so it can't be limited to one "
+                                          "branch. Make it inactive and create a branch plan instead")
+                plan.branch_id = scope.require_branch()
         changes = {f: getattr(data, f) for f in _FIELDS if f in sent}
         changes = {f: v for f, v in changes.items() if not (v is None and f in _REQUIRED)}
         if "category_id" in changes:
@@ -137,8 +160,8 @@ class PlanService:
         return await self.get_plan(plan.id, scope)
 
     async def delete_plan(self, plan_id: UUID, scope: BranchScope, actor: RequestContext) -> None:
-        scope.require_branch()
         plan = await self._get(plan_id, scope)
+        await self._can_change(plan, scope, actor)
         if await self._repo.is_in_use(plan.id):
             raise BadRequestError("Members are on this plan, so it can't be deleted. Make it inactive instead")
         plan.soft_delete(actor.user_id)

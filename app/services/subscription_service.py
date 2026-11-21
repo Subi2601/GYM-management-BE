@@ -134,7 +134,7 @@ class SubscriptionService:
         return member
 
     async def _plans_in_branch(self, plan_ids: list[UUID], scope: BranchScope, branch_id: UUID) -> list[Plan]:
-        found = {p.id: p for p in await self._repo.get_plans(plan_ids, scope) if p.branch_id == branch_id}
+        found = {p.id: p for p in await self._repo.get_plans(plan_ids, scope) if p.sold_in(branch_id)}
         if len(found) != len(plan_ids):
             raise NotFoundError("Plan")
         return [found[pid] for pid in plan_ids]
@@ -331,7 +331,7 @@ class SubscriptionService:
                                                active_only=True)
         options = []
         for plan, category_name in rows:
-            if plan.branch_id != member.branch_id:
+            if not plan.sold_in(member.branch_id):
                 continue
             reason = self._option_reason(plan, current) if current else "No current plan"
             options.append({

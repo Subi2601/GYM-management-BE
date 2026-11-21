@@ -52,6 +52,12 @@ PyJWT HS256 · bcrypt (cost 12) · cryptography (Fernet). No Redis / Celery / ba
   person from the `stag_device` cookie (phone linked once via phone + ID number, stored hashed in
   `attendance_devices`), optional geofence from the branch latitude / longitude. Public endpoints are rate limited
   in-process (`app/core/ratelimit.py`).
+- **Common plans / offers**: `plan_plans.branch_id` / `plan_offers.branch_id` NULL = common to every branch of the gym
+  (`common: true` in the API). Reads go through `BaseRepository.scoped_shared` / `get_scoped_shared` (branch rows +
+  common rows); billing checks `plan.sold_in(branch_id)`, never `plan.branch_id == …`. Creating / changing a common row
+  needs `branch:switch` (`ScopeService.require_common_access`) and works from "All Branches" too; branch rows still
+  need a selected branch. A common plan members are on can't be moved back to one branch. Offer names are unique per
+  branch + the common ones.
 - **Offers** (`plan_offers`) are the discount master: billing sends `offer_id` and the backend applies the offer's %
   (`OfferService.discount_for`), refusing offers that are switched off or outside their dates. `category_ids` limits
   an offer to plan categories (empty = every plan); the % applies only to the matching lines.
@@ -146,7 +152,7 @@ diet plans · dashboard. Endpoint list: `../docs/02_API_REFERENCE.md` (regenerat
 python -m venv env; .\env\Scripts\pip install -r requirements.txt
 .\env\Scripts\python -m scripts.gen_dev_secrets          # first time: prints JWT_SECRET / PII_KEY for .env
 .\env\Scripts\alembic upgrade head
-.\env\Scripts\python -m app.utils.seed                    # RBAC catalogue, demo org/branches/logins, foods, plans
+.\env\Scripts\python -m app.utils.seed                    # RBAC catalogue, gym + first branch + Owner / superadmin (SEED_* in .env), plan categories, foods — no demo branches / plans (smoke tests expect a "North Branch" + plans: add them by hand on a fresh DB)
 .\env\Scripts\uvicorn app.main:app --port 8001 --reload   # 8001: the frontend proxy's default
 .\env\Scripts\python -m scripts.smoke_test                # + smoke_org_plans_leads / smoke_billing / smoke_staff / smoke_diet / smoke_attendance / smoke_members_extras / smoke_plans_groups / smoke_upgrade / smoke_roles / smoke_enquiry / smoke_trial_settings / smoke_memberships / smoke_referrals / smoke_gym_profile (pass http://127.0.0.1:8001 as the base URL)
 ```

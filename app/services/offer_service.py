@@ -15,6 +15,7 @@ from app.core.enums import MEMBERSHIP_PLAN_TYPES
 from app.core.scope import BranchScope
 from app.models.billing import Offer
 from app.repositories.offer_repository import OfferRepository
+from app.services.scope_service import ScopeService
 
 _FIELDS = ("name", "discount_percent", "valid_from", "valid_to", "description", "is_active")
 
@@ -52,6 +53,7 @@ def extend_end(end: date, o: Offer) -> date:
 class OfferService:
     def __init__(self, db: AsyncSession) -> None:
         self._repo = OfferRepository(db)
+        self._scope = ScopeService(db)
 
     @staticmethod
     def offer_out(o: Offer) -> dict:
@@ -63,6 +65,7 @@ class OfferService:
                 "summary": offer_summary(o),
                 "valid_from": o.valid_from, "valid_to": o.valid_to, "description": o.description,
                 "is_active": o.is_active, "available": available, "category_ids": list(o.category_ids or []),
+                "branch_id": o.branch_id, "common": o.is_common,
                 "created_at": o.created_at, "updated_at": o.updated_at}
 
     async def apply_bonus(self, offer_id: UUID | None, lines: list, scope: BranchScope) -> str | None:
@@ -122,11 +125,22 @@ class OfferService:
         if valid_from and valid_to and valid_from > valid_to:
             raise BadRequestError("Valid to must be on or after valid from")
 
+    async def _can_change(self, offer: Offer, scope: BranchScope, actor: RequestContext) -> None:
+        """Common offers: all-branch roles only (from any view). Branch offers: from that branch."""
+        if offer.is_common:
+            await self._scope.require_common_access(actor)
+        else:
+            scope.require_branch()
+
     async def create_offer(self, data, scope: BranchScope, actor: RequestContext) -> dict:
-        branch_id = scope.require_branch()
+        if data.common:
+            await self._scope.require_common_access(actor)
+            branch_id = None
+        else:
+            branch_id = scope.require_branch()
         self._check_window(data.valid_from, data.valid_to)
         name = data.name.strip()
-        if await self._repo.name_taken(branch_id, name):
+        if await self._repo.name_taken(scope.organization_id, branch_id, name):
             raise ConflictError(f"An offer named '{name}' already exists")
         offer = await self._repo.add(Offer(
             organization_id=scope.organization_id, branch_id=branch_id, name=name,
@@ -138,17 +152,22 @@ class OfferService:
         return self.offer_out(offer)
 
     async def update_offer(self, offer_id: UUID, data, scope: BranchScope, actor: RequestContext) -> dict:
-        branch_id = scope.require_branch()
         offer = await self._get(offer_id, scope)
+        await self._can_change(offer, scope, actor)
         sent = data.model_fields_set
+        if "common" in sent and data.common is not None and data.common != offer.is_common:
+            if data.common:                              # branch offer → every branch
+                await self._scope.require_common_access(actor)
+                offer.branch_id = None
+            else:                                        # common → only the selected branch
+                offer.branch_id = scope.require_branch()
         valid_from = data.valid_from if "valid_from" in sent else offer.valid_from
         valid_to = data.valid_to if "valid_to" in sent else offer.valid_to
         self._check_window(valid_from, valid_to)
-        if "name" in sent and data.name:
-            name = data.name.strip()
-            if await self._repo.name_taken(branch_id, name, exclude_id=offer.id):
-                raise ConflictError(f"An offer named '{name}' already exists")
-            offer.name = name
+        name = data.name.strip() if "name" in sent and data.name else offer.name
+        if await self._repo.name_taken(scope.organization_id, offer.branch_id, name, exclude_id=offer.id):
+            raise ConflictError(f"An offer named '{name}' already exists")
+        offer.name = name
         if "discount_percent" in sent and data.discount_percent is not None:
             offer.discount_percent = Decimal(str(data.discount_percent))
         if "extra_months" in sent and data.extra_months is not None:
@@ -171,8 +190,8 @@ class OfferService:
         return self.offer_out(offer)
 
     async def set_status(self, offer_id: UUID, is_active: bool, scope: BranchScope, actor: RequestContext) -> dict:
-        scope.require_branch()
         offer = await self._get(offer_id, scope)
+        await self._can_change(offer, scope, actor)
         offer.is_active = is_active
         offer.updated_by = actor.user_id
         await self._repo.commit()

@@ -21,11 +21,13 @@ class Settings(BaseSettings):
     # Idle session timeout — no authenticated request for this long ends the session.
     SESSION_IDLE_TIMEOUT_MINUTES: int = 120
 
+    # Seed: the gym, its first (head office) branch and the Owner login — created once, found again by Gym ID.
     SEED_ORG_NAME: str = "Stag Fitness"
+    SEED_ORG_CODE: str = "STAG"
+    SEED_BRANCH_NAME: str = "Main Branch"
+    SEED_BRANCH_LOCATION: str = ""
     SEED_OWNER_EMAIL: str = "owner@gym.com"
     SEED_OWNER_PASSWORD: str = "owner123"
-    SEED_TRAINER_EMAIL: str = "trainer@gym.com"
-    SEED_TRAINER_PASSWORD: str = "trainer123"
     SEED_SUPERADMIN_EMAIL: str = "superadmin@stag.local"
     SEED_SUPERADMIN_PASSWORD: str = "Super@123"
 

@@ -35,7 +35,7 @@ class SubscriptionRepository(BaseRepository):
         return await self.get_scoped(Member, member_id, scope)
 
     async def get_plans(self, plan_ids: list[UUID], scope: BranchScope) -> list[Plan]:
-        stmt = self.scoped(Plan, select(Plan).where(Plan.id.in_(plan_ids)), scope)
+        stmt = self.scoped_shared(Plan, select(Plan).where(Plan.id.in_(plan_ids)), scope)
         return list((await self._db.execute(stmt)).scalars().all())
 
     async def get_subscriptions(self, ids: list[UUID], scope: BranchScope, *,

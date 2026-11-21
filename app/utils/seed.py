@@ -1,22 +1,23 @@
-"""Idempotent seed — RBAC catalogue, demo organization + logins, food catalogue, demo plans.
+"""Idempotent seed — RBAC catalogue, the gym (name / Gym ID / first branch from .env) with its Owner login,
+the platform superadmin, the gym's default plan categories and the shared food catalogue. No demo branches or plans:
+branches are added in Gym Settings and plans on the Plans screen (or `python -m scripts.load_stag_tariff`).
 
-Run:  python -m app.utils.seed
+Run:  python -m app.utils.seed   (every deploy: new permissions reach the built-in roles)
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from decimal import Decimal
 
 from rbac.models import RBACModule, RBACPermission, RBACRole, RBACRolePermission, RBACScreen, UserRole
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.enums import AccountRole, FoodCategory, PlanServiceType, PlanType
+from app.core.enums import AccountRole, FoodCategory
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
-from app.models.billing import Plan, PlanCategory
+from app.models.billing import PlanCategory
 from app.models.diet import FoodItem
 from app.models.organization import Branch, Organization
 from app.models.user import User
@@ -42,16 +43,6 @@ FOODS = [
     ("Almonds", "VEG", 579.0, 21.0, 22.0, 50.0, "grams", "Healthy fats and Vitamin E"),
     ("Apple", "VEG", 52.0, 0.3, 14.0, 0.2, "pieces", "Fiber-rich fruit"),
     ("Peanut Butter", "VEG", 588.0, 25.0, 20.0, 50.0, "grams", "Protein and healthy fats"),
-]
-
-DEMO_PLANS = [
-    # name, type, service_type, days, price, sessions
-    ("Monthly Membership", PlanType.MEMBERSHIP, PlanServiceType.GENERAL, 30, "1500", 0),
-    ("Quarterly Membership", PlanType.MEMBERSHIP, PlanServiceType.GENERAL, 90, "4000", 0),
-    ("Annual Membership", PlanType.MEMBERSHIP, PlanServiceType.GENERAL, 365, "12000", 0),
-    ("Personal Training - 12 Sessions", PlanType.ADD_ON, PlanServiceType.PERSONAL_TRAINING, 30, "6000", 12),
-    ("Diet Plan - Standard", PlanType.ADD_ON, PlanServiceType.DIET, 30, "1000", 0),
-    ("Diet Plan - Premium", PlanType.ADD_ON, PlanServiceType.DIET, 30, "2000", 0),
 ]
 
 
@@ -125,46 +116,36 @@ async def _ensure_user(db: AsyncSession, *, email: str, password: str, name: str
     return user
 
 
-async def seed_demo(db: AsyncSession) -> None:
-    org = await _first(db, select(Organization).where(Organization.code == "STAG"))
+async def seed_gym(db: AsyncSession) -> None:
+    """The gym + its first (head office) branch + Owner, the same three things superadmin onboarding creates.
+    Found again by Gym ID on later runs, so renaming the gym or branch in the app is kept."""
+    code = settings.SEED_ORG_CODE.strip().upper()
+    org = await _first(db, select(Organization).where(Organization.code == code))
     if org is None:
-        org = Organization(name=settings.SEED_ORG_NAME, code="STAG")
+        org = Organization(name=settings.SEED_ORG_NAME, code=code)
         db.add(org)
         await db.flush()
-    branches = []
-    for name, location in (("Main Branch", "Downtown"), ("North Branch", "North Side")):
-        branch = await _first(db, select(Branch).where(Branch.organization_id == org.id, Branch.branch_name == name))
-        if branch is None:
-            branch = Branch(organization_id=org.id, branch_name=name, location=location)
-            db.add(branch)
-            await db.flush()
-        branches.append(branch)
-    main, north = branches
+        _log.info("created gym %s (%s)", org.name, code)
+
+    branch = await _first(db, select(Branch).where(Branch.organization_id == org.id, Branch.deleted_at.is_(None))
+                          .order_by(Branch.is_head_office.desc(), Branch.created_at))
+    if branch is None:
+        branch = Branch(organization_id=org.id, branch_name=settings.SEED_BRANCH_NAME,
+                        location=settings.SEED_BRANCH_LOCATION or None, is_head_office=True)
+        db.add(branch)
+        await db.flush()
+        _log.info("created branch %s", branch.branch_name)
 
     await _ensure_user(db, email=settings.SEED_OWNER_EMAIL, password=settings.SEED_OWNER_PASSWORD,
-                       name="Owner", role=AccountRole.OWNER, org=org, branch=main)
-    await _ensure_user(db, email=settings.SEED_TRAINER_EMAIL, password=settings.SEED_TRAINER_PASSWORD,
-                       name="Trainer", role=AccountRole.TRAINER, org=org, branch=north)
+                       name="Owner", role=AccountRole.OWNER, org=org, branch=branch)
     await _ensure_user(db, email=settings.SEED_SUPERADMIN_EMAIL, password=settings.SEED_SUPERADMIN_PASSWORD,
                        name="Platform Admin", role=AccountRole.OWNER, org=None, branch=None, superadmin=True)
 
+    # Plan categories belong to the gym (no branch), so every branch sees the same list.
     if await _first(db, select(PlanCategory).where(PlanCategory.organization_id == org.id)) is None:
         for i, cat_name in enumerate(DEFAULT_CATEGORIES, start=1):
             db.add(PlanCategory(organization_id=org.id, name=cat_name, sort_order=i))
         await db.flush()
-    categories = {c.name: c.id for c in (await db.execute(
-        select(PlanCategory).where(PlanCategory.organization_id == org.id))).scalars()}
-
-    if await _first(db, select(Plan).where(Plan.organization_id == org.id)) is None:
-        for branch in branches:
-            for name, ptype, service, days, price, sessions in DEMO_PLANS:
-                category = ("Personal Training" if service == PlanServiceType.PERSONAL_TRAINING
-                            else "Diet" if service == PlanServiceType.DIET else "General")
-                db.add(Plan(organization_id=org.id, branch_id=branch.id, name=name, type=ptype,
-                            service_type=service, duration_days=days, price=Decimal(price),
-                            total_sessions=sessions, category_id=categories[category],
-                            duration_months={30: 1, 90: 3, 365: 12}.get(days) if ptype == PlanType.MEMBERSHIP
-                            else None))
 
     if await _first(db, select(FoodItem).where(FoodItem.organization_id.is_(None))) is None:
         for name, cat, kcal, protein, carbs, fats, unit, benefits in FOODS:
@@ -175,7 +156,7 @@ async def seed_demo(db: AsyncSession) -> None:
 async def main() -> None:
     async with AsyncSessionLocal() as db:
         await seed_rbac(db)
-        await seed_demo(db)
+        await seed_gym(db)
         await seed_org_roles(db)
         await db.commit()
     _log.info("seed complete")

@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, TypeVar
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, func, select
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.scope import BranchScope
@@ -47,6 +47,17 @@ class BaseRepository:
         return stmt.where(model.organization_id == scope.organization_id,
                           model.branch_id.in_(scope.branch_ids),
                           model.is_delete.is_(False))
+
+    @staticmethod
+    def scoped_shared(model: Any, stmt: Select, scope: BranchScope) -> Select:
+        """`scoped` for masters a gym can share (plans, offers): branch_id NULL = common to every branch."""
+        return stmt.where(model.organization_id == scope.organization_id,
+                          or_(model.branch_id.in_(scope.branch_ids), model.branch_id.is_(None)),
+                          model.is_delete.is_(False))
+
+    async def get_scoped_shared(self, model: Any, obj_id: UUID, scope: BranchScope) -> Any | None:
+        stmt = self.scoped_shared(model, select(model).where(model.id == obj_id), scope)
+        return (await self._db.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     def ordered(stmt: Select, columns: dict[str, ColumnElement], sort_by: str | None, sort_dir: str,

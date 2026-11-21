@@ -90,7 +90,7 @@ class TrainingService:
         if member is None or member.branch_id != branch_id:
             raise NotFoundError("Member")
         plan = await self._repo.get_plan(data.plan_id, scope)
-        if plan is None or plan.branch_id != branch_id:
+        if plan is None or not plan.sold_in(branch_id):
             raise NotFoundError("Plan")
         if plan.service_type != PlanServiceType.PERSONAL_TRAINING:
             raise BadRequestError("Plan is not a personal training plan")

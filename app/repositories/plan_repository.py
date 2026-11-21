@@ -24,9 +24,9 @@ def _status_condition(status: str | None):
 class PlanRepository(BaseRepository):
 
     def _rows(self, scope: BranchScope):
-        """(Plan, category name)."""
+        """(Plan, category name) — the branch's own plans + the gym's common plans."""
         stmt = select(Plan, PlanCategory.name).join(PlanCategory, PlanCategory.id == Plan.category_id)
-        return self.scoped(Plan, stmt, scope)
+        return self.scoped_shared(Plan, stmt, scope)
 
     async def list_plans(self, scope: BranchScope, *, offset: int, limit: int, search: str | None = None,
                          plan_type: PlanType | None = None, service_type: PlanServiceType | None = None,
@@ -56,7 +56,7 @@ class PlanRepository(BaseRepository):
     async def tab_counts(self, scope: BranchScope, *, search: str | None = None,
                          category_id: UUID | None = None) -> dict[str, int]:
         """all / active / inactive (status tabs) + membership / addon / custom, within the search and category."""
-        stmt = self.scoped(Plan, select(Plan), scope)
+        stmt = self.scoped_shared(Plan, select(Plan), scope)
         if search:
             stmt = stmt.where(Plan.name.ilike(f"%{search}%"))
         if category_id:
@@ -67,7 +67,7 @@ class PlanRepository(BaseRepository):
             "custom": Plan.type == PlanType.CUSTOM})
 
     async def get_plan(self, plan_id: UUID, scope: BranchScope) -> Plan | None:
-        return await self.get_scoped(Plan, plan_id, scope)
+        return await self.get_scoped_shared(Plan, plan_id, scope)
 
     async def get_plan_row(self, plan_id: UUID, scope: BranchScope):
         return (await self._db.execute(self._rows(scope).where(Plan.id == plan_id))).first()

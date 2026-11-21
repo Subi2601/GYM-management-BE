@@ -43,9 +43,25 @@ def _upgrade_window_default(context) -> int:
     return default_upgrade_window(params.get("duration_months"), params.get("duration_days"))
 
 
+def _shared_branch_id() -> Mapped[uuid.UUID | None]:
+    """branch_id for masters a gym can share: NULL = common to every branch (owner / all-branch roles set it)."""
+    return mapped_column(UUID(as_uuid=True), ForeignKey("org_branches.id", ondelete="RESTRICT"),
+                         nullable=True, index=True, sort_order=-8)
+
+
 class Plan(BranchScopedMixin, BaseModel):
-    """A sellable plan. `is_active` (BaseModel) = shown for billing; hidden plans stay for history."""
+    """A sellable plan. `is_active` (BaseModel) = shown for billing; hidden plans stay for history.
+    branch_id NULL = common plan, sold in every branch (same price everywhere)."""
     __tablename__ = "plan_plans"
+
+    branch_id: Mapped[uuid.UUID | None] = _shared_branch_id()
+
+    @property
+    def is_common(self) -> bool:
+        return self.branch_id is None
+
+    def sold_in(self, branch_id: uuid.UUID | None) -> bool:
+        return self.branch_id is None or self.branch_id == branch_id
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     category_id: Mapped[uuid.UUID] = mapped_column(
@@ -169,8 +185,15 @@ class Subscription(BranchScopedMixin, BaseModel):
 
 class Offer(BranchScopedMixin, BaseModel):
     """Discount master (festival / referral offers). Billing screens offer only the active ones in their date
-    window; the percentage is applied to the plans total. `is_active` (from BaseModel) is the on / off switch."""
+    window; the percentage is applied to the plans total. `is_active` (from BaseModel) is the on / off switch.
+    branch_id NULL = common offer, available in every branch."""
     __tablename__ = "plan_offers"
+
+    branch_id: Mapped[uuid.UUID | None] = _shared_branch_id()
+
+    @property
+    def is_common(self) -> bool:
+        return self.branch_id is None
 
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     discount_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)

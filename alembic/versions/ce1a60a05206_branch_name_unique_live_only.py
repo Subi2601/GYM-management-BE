@@ -8,19 +8,11 @@ Create Date: 2026-11-10 15:08:46.060396
 from typing import Sequence, Union
 
 from alembic import op
-<<<<<<< Updated upstream
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'ce1a60a05206'
-down_revision: Union[str, None] = 'e5a7c9d1f3b4'
-=======
-
-
 revision: str = "ce1a60a05206"
 down_revision: Union[str, None] = "e5a7c9d1f3b4"
->>>>>>> Stashed changes
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -31,6 +31,8 @@ class PlanCreate(FormSchema):
     # Money back on cancel; within these days of use (empty = the gym's refund days).
     refundable: bool = False
     refund_window_days: int | None = Field(default=None, ge=0, le=3650)
+    # True = common plan, sold in every branch (owner / all-branch roles only). False = the selected branch.
+    common: bool = False
 
 
 class PlanUpdate(FormSchema):
@@ -51,10 +53,12 @@ class PlanUpdate(FormSchema):
     description: str | None = Field(default=None, max_length=2000)
     refundable: bool | None = None
     refund_window_days: int | None = Field(default=None, ge=0, le=3650)
+    common: bool | None = None
 
 
 class PlanResponse(UUIDSchema, TimestampMixin):
-    branch_id: UUID
+    branch_id: UUID | None = None          # None = common plan
+    common: bool = False                   # sold in every branch of the gym
     name: str
     category_id: UUID
     category_name: str

@@ -50,6 +50,14 @@ class ScopeService:
             raise PermissionDeniedError("No branch is assigned to this account")
         return BranchScope(ctx.organization_id, user.branch_id, (user.branch_id,))
 
+    async def can_switch_branch(self, ctx: RequestContext) -> bool:
+        return ctx.is_superadmin or await self._rbac.has_permission(ctx.user_id, SWITCH_BRANCH_PERMISSION)
+
+    async def require_common_access(self, ctx: RequestContext) -> None:
+        """Common (all-branch) plans / offers belong to every branch, so only all-branch roles change them."""
+        if not await self.can_switch_branch(ctx):
+            raise PermissionDeniedError("Only the owner or an all-branch role can change items shared by every branch")
+
     async def can_view_pii(self, ctx: RequestContext) -> bool:
         return ctx.is_superadmin or await self._rbac.has_permission(ctx.user_id, PII_VIEW_PERMISSION)
 

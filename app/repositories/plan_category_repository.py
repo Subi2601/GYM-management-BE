@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 
 from app.core.scope import BranchScope
 from app.models.billing import Plan, PlanCategory
@@ -15,7 +15,8 @@ class PlanCategoryRepository(BaseRepository):
     async def list_with_counts(self, scope: BranchScope) -> list:
         """Rows (category, plans in scope, active plans in scope), in tab order."""
         plan_in_scope = and_(Plan.category_id == PlanCategory.id, Plan.organization_id == scope.organization_id,
-                             Plan.branch_id.in_(scope.branch_ids), Plan.is_delete.is_(False))
+                             or_(Plan.branch_id.in_(scope.branch_ids), Plan.branch_id.is_(None)),
+                             Plan.is_delete.is_(False))
         total = select(func.count(Plan.id)).where(plan_in_scope).scalar_subquery()
         active = select(func.count(Plan.id)).where(plan_in_scope, Plan.is_active.is_(True)).scalar_subquery()
         stmt = self.alive(PlanCategory, select(PlanCategory, total, active)

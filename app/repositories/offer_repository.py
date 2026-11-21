@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, func, or_, select, true
 
 from app.core.scope import BranchScope
 from app.models.billing import Offer
@@ -32,7 +32,7 @@ class OfferRepository(BaseRepository):
 
     async def list_offers(self, scope: BranchScope, *, offset: int, limit: int, search: str | None,
                           tab: str | None, sort_by: str | None, sort_dir: str) -> tuple[list[Offer], int]:
-        stmt = self.scoped(Offer, select(Offer), scope)
+        stmt = self.scoped_shared(Offer, select(Offer), scope)
         if search:
             stmt = stmt.where(Offer.name.ilike(f"%{search}%"))
         cond = _tab_condition(tab)
@@ -44,19 +44,23 @@ class OfferRepository(BaseRepository):
         return await self.paginate_scalars(stmt, offset=offset, limit=limit)
 
     async def tab_counts(self, scope: BranchScope) -> dict[str, int]:
-        return await self.count_tabs(self.scoped(Offer, select(Offer), scope),
+        return await self.count_tabs(self.scoped_shared(Offer, select(Offer), scope),
                                      {t: _tab_condition(t) for t in OFFER_TABS})
 
     async def available(self, scope: BranchScope, today: date) -> list[Offer]:
-        stmt = self.scoped(Offer, select(Offer).where(available_condition(today)), scope)
+        stmt = self.scoped_shared(Offer, select(Offer).where(available_condition(today)), scope)
         return list((await self._db.execute(stmt.order_by(Offer.name.asc()))).scalars().all())
 
     async def get_offer(self, offer_id: UUID, scope: BranchScope) -> Offer | None:
-        return await self.get_scoped(Offer, offer_id, scope)
+        return await self.get_scoped_shared(Offer, offer_id, scope)
 
-    async def name_taken(self, branch_id: UUID, name: str, exclude_id: UUID | None = None) -> bool:
-        stmt = select(Offer.id).where(Offer.branch_id == branch_id, func.lower(Offer.name) == name.lower(),
-                                      Offer.is_delete.is_(False))
+    async def name_taken(self, organization_id: UUID, branch_id: UUID | None, name: str,
+                         exclude_id: UUID | None = None) -> bool:
+        """A branch offer can't share its name with another offer of that branch or a common one; a common offer
+        (branch_id None) can't share it with any offer of the gym — the billing dropdown shows them together."""
+        branch_cond = or_(Offer.branch_id.is_(None), Offer.branch_id == branch_id) if branch_id else true()
+        stmt = select(Offer.id).where(Offer.organization_id == organization_id, branch_cond,
+                                      func.lower(Offer.name) == name.lower(), Offer.is_delete.is_(False))
         if exclude_id:
             stmt = stmt.where(Offer.id != exclude_id)
         return (await self._db.execute(stmt.limit(1))).first() is not None

@@ -26,7 +26,7 @@ class TrainingRepository(BaseRepository):
         return await self.get_scoped(Member, member_id, scope)
 
     async def get_plan(self, plan_id: UUID, scope: BranchScope) -> Plan | None:
-        return await self.get_scoped(Plan, plan_id, scope)
+        return await self.get_scoped_shared(Plan, plan_id, scope)
 
     async def get_pt(self, pt_id: UUID, scope: BranchScope, *, for_update: bool = False) -> PTSubscription | None:
         stmt = self.scoped(PTSubscription, select(PTSubscription).where(PTSubscription.id == pt_id), scope)
